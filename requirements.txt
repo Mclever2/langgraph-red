@@ -1,0 +1,20 @@
+# ── Core LangChain / LangGraph ───────────────────────────────────────────────
+langgraph>=0.2.28
+langchain-groq>=0.2.0
+langchain-core>=0.3.0
+langchain-community>=0.3.0          # Chroma vectorstore
+langchain-huggingface>=0.1.2        # HuggingFaceEmbeddings (local, gratis)
+langchain-text-splitters>=0.3.0     # RecursiveCharacterTextSplitter
+
+# ── RAG / Vectorización ───────────────────────────────────────────────────────
+chromadb>=0.5.0                     # Base de datos vectorial en memoria
+sentence-transformers>=3.2.0        # all-MiniLM-L6-v2 (~80 MB, se descarga una vez)
+pdfplumber>=0.11.0                  # Extracción robusta de texto de PDFs
+
+# ── Interfaz ──────────────────────────────────────────────────────────────────
+streamlit>=1.38.0
+
+# ── Utilidades ────────────────────────────────────────────────────────────────
+pydantic>=2.7.0
+python-dotenv>=1.0.0
+typing-extensions>=4.9.0            # TypedDict compatible con Python < 3.12
