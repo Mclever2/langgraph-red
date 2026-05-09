@@ -53,14 +53,17 @@ def render_pantalla_seleccion() -> None:
 
     st.divider()
 
-    # Estimación de tiempo
-    llamadas_por_ciclo = 2 + max_debate * 2  # Supervisor+Redactor+(Auditor||Metod)+debate×2
-    tiempo_est_min = max_iter * llamadas_por_ciclo * 6 // 60
-    tiempo_est_max = max_iter * llamadas_por_ciclo * 10 // 60
+    # Estimación de tiempo (red pura: cada hop supervisor→agente→supervisor ≈ 2 llamadas LLM)
+    # Por iteración: supervisor + redactor + supervisor + auditor + supervisor + metod
+    #                + supervisor + debate×max_debate + supervisor = ~(4+max_debate)*2 llamadas
+    llamadas_por_iter = (4 + max_debate) * 2
+    tiempo_est_min = max_iter * llamadas_por_iter * 6 // 60
+    tiempo_est_max = max_iter * llamadas_por_iter * 10 // 60
+    max_pasos_display = max_iter * (4 + max_debate) + 3
     st.info(
         f"⏱️ **Tiempo estimado:** {tiempo_est_min}–{tiempo_est_max} min · "
-        f"**Agentes activos:** Supervisor, Redactor, Auditor, Metodólogo · "
-        f"**Evaluación paralela:** Auditor ∥ Metodólogo",
+        f"**Pasos máximos de red:** {max_pasos_display} · "
+        f"**Agentes:** Supervisor (orquestador), Redactor, Auditor, Metodólogo, Debate",
         icon="ℹ️",
     )
 
@@ -106,34 +109,49 @@ def render_pantalla_seleccion() -> None:
         col_i2.info("ℹ️ Sin contexto cruzado (secciones aún no escritas)")
 
     # ── Estado inicial para el grafo ──────────────────────────────────────────
+    # max_pasos_red: techo de pasos para la red.
+    # Cálculo: por cada iteración el Supervisor toma ~6 decisiones
+    # (→redactor, →auditor, →metod, →debate×max_debate, →redactor_o_humano)
+    # + 1 decisión final → max_iter × (4 + max_debate) + 3
+    max_pasos = max_iter * (4 + max_debate) + 3
+
     estado_inicial = {
-        "seccion_objetivo":          seccion_elegida,
-        "contexto_recuperado":       contexto_tesis,
-        "contexto_dependencias":     contexto_dependencias,
-        "contexto_teorico":          contexto_teoria,
-        "max_iteraciones":           max_iter,
-        "max_rondas_debate":         max_debate,
-        "plan_supervisor":           "",
-        "texto_iterado":             "",
-        "feedback_auditor":          "",
-        "numero_iteracion":          0,
-        "errores_rubrica":           [],
-        "puntaje_estimado":          None,
+        # ── Contexto ──────────────────────────────────────────────────────────
+        "seccion_objetivo":            seccion_elegida,
+        "contexto_recuperado":         contexto_tesis,
+        "contexto_dependencias":       contexto_dependencias,
+        "contexto_teorico":            contexto_teoria,
+        # ── Configuración de ciclos ───────────────────────────────────────────
+        "max_iteraciones":             max_iter,
+        "max_rondas_debate":           max_debate,
+        # ── Red multiagente ───────────────────────────────────────────────────
+        "siguiente_nodo":              "",        # El Supervisor lo llena en su 1.ª llamada
+        "instrucciones_supervisor":    "",
+        "pasos_ejecutados":            0,
+        "max_pasos_red":               max_pasos,
+        "iter_auditada":               0,
+        "iter_metodologica":           0,
+        # ── Estado de agentes ─────────────────────────────────────────────────
+        "plan_supervisor":             "",
+        "texto_iterado":               "",
+        "feedback_auditor":            "",
+        "numero_iteracion":            0,
+        "errores_rubrica":             [],
+        "puntaje_estimado":            None,
         "observaciones_metodologicas": "",
-        "ronda_debate":              0,
-        "historial_debate":          [],
-        "argumento_redactor":        "",
-        "veredicto_debate":          "",
-        "aprobacion_humana":         None,
+        "ronda_debate":                0,
+        "historial_debate":            [],
+        "argumento_redactor":          "",
+        "veredicto_debate":            "",
+        "aprobacion_humana":           None,
     }
 
     config = get_config()
 
     with st.status("🤖 Red multiagente trabajando…", expanded=True) as status_run:
-        st.write("🧠 **Supervisor** analizando sección y preparando plan…")
-        st.write("✍️ **Redactor** mejorará el texto con contexto cruzado…")
-        st.write("⚖️ **Auditor** ∥ **Metodólogo** evaluarán en paralelo…")
-        st.write("🗣️ **Debate** entre agentes resolverá discrepancias…")
+        st.write("🧠 **Supervisor** orquesta la red — decide dinámicamente el siguiente agente…")
+        st.write("✍️ **Redactor** → **Auditor** → **Metodólogo** → **Debate** (orden decidido por el Supervisor LLM)")
+        st.write("🔄 Cada agente regresa al Supervisor para que decida el siguiente paso…")
         try:
             graph.invoke(estado_inicial, config)
         except Exception as exc:

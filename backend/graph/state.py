@@ -52,3 +52,13 @@ class MentoriaState(TypedDict):
 
     # ── HITL ──────────────────────────────────────────────────────────────────
     aprobacion_humana:      Optional[str]
+
+    # ── Red multiagente — routing dinámico del Supervisor ────────────────────
+    siguiente_nodo:           str   # decisión del Supervisor → siguiente agente
+    instrucciones_supervisor: str   # nota del Supervisor para el siguiente agente
+    pasos_ejecutados:         int   # contador total de pasos (anti-bucle)
+    max_pasos_red:            int   # techo de pasos (inyectado por Streamlit)
+
+    # Rastreo por iteración (el Supervisor los lee para decidir quién ya corrió)
+    iter_auditada:            int   # numero_iteracion cuando el Auditor ejecutó por última vez
+    iter_metodologica:        int   # numero_iteracion cuando el Metodólogo ejecutó por última vez

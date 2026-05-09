@@ -110,6 +110,8 @@ def make_nodo_auditor(llm: ChatGroq):
             "feedback_auditor": resultado.feedback_general,
             "errores_rubrica":  errores,
             "puntaje_estimado": resultado.puntaje_total,
+            # Informa al Supervisor que el Auditor ya corrió en esta iteración
+            "iter_auditada":    state.get("numero_iteracion", 1),
         }
 
     return nodo_auditor

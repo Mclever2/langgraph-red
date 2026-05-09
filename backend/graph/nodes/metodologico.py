@@ -42,6 +42,10 @@ def make_nodo_metodologico(llm: ChatGroq):
         })
 
         logger.info(f"[Metodólogo] Evaluación completada ({len(respuesta.content)} chars)")
-        return {"observaciones_metodologicas": respuesta.content.strip()}
+        return {
+            "observaciones_metodologicas": respuesta.content.strip(),
+            # Informa al Supervisor que el Metodólogo ya corrió en esta iteración
+            "iter_metodologica": state.get("numero_iteracion", 1),
+        }
 
     return nodo_metodologico
