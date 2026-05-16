@@ -261,45 +261,49 @@ DEPENDENCIAS_SECCIONES: dict[str, list[str]] = {
         "3.3 Variables (Operacionalización)",
     ],
     "3.3 Variables (Operacionalización)": [
-        "1. Título del proyecto",
-        "1.2 Objetivos (General y Específicos)",
-        "3.1–3.2 Hipótesis",
+        "3.4 Matriz de consistencia",
+        "4.1–4.3 Tipo, Método y Diseño",
+        "4.5 Instrumentos de recolección de datos",
     ],
     "3.4 Matriz de consistencia": [
-        "1.1.2 Problema central (formulación)",
-        "1.2 Objetivos (General y Específicos)",
-        "3.1–3.2 Hipótesis",
         "3.3 Variables (Operacionalización)",
         "4.1–4.3 Tipo, Método y Diseño",
+        "4.7 Análisis de datos",
     ],
     "4.1–4.3 Tipo, Método y Diseño": [
-        "1.1.2 Problema central (formulación)",
-        "3.1–3.2 Hipótesis",
         "3.3 Variables (Operacionalización)",
+        "3.4 Matriz de consistencia",
+        "4.4 Población y muestra",
     ],
     "4.4 Población y muestra": [
         "4.1–4.3 Tipo, Método y Diseño",
+        "4.5 Instrumentos de recolección de datos",
         "3.3 Variables (Operacionalización)",
     ],
     "4.5 Instrumentos de recolección de datos": [
         "3.3 Variables (Operacionalización)",
         "4.1–4.3 Tipo, Método y Diseño",
+        "4.4 Población y muestra",
     ],
     "4.6 Procedimiento de ejecución": [
         "4.1–4.3 Tipo, Método y Diseño",
         "4.4 Población y muestra",
+        "4.5 Instrumentos de recolección de datos",
     ],
     "4.7 Análisis de datos": [
         "3.3 Variables (Operacionalización)",
         "4.1–4.3 Tipo, Método y Diseño",
-        "3.1–3.2 Hipótesis",
+        "4.5 Instrumentos de recolección de datos",
     ],
     "5. Aspectos administrativos": [
-        "1.2 Objetivos (General y Específicos)",
+        "4.1–4.3 Tipo, Método y Diseño",
+        "4.4 Población y muestra",
+        "4.6 Procedimiento de ejecución",
     ],
     "III. Referencias bibliográficas": [
-        "2.2 Investigaciones antecedentes",
-        "2.3 Base teórica (Variables)",
+        "3.3 Variables (Operacionalización)",
+        "4.1–4.3 Tipo, Método y Diseño",
+        "4.5 Instrumentos de recolección de datos",
     ],
 }
 

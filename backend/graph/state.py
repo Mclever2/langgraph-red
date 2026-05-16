@@ -1,6 +1,6 @@
-"""Estado global del grafo multiagente de mentoría académica UPAO."""
+"""Estado global del grafo multiagente de mentoría académica."""
 
-from typing import List, Optional
+from typing import List, Optional, Any
 from typing_extensions import TypedDict
 
 
@@ -22,15 +22,19 @@ class MentoriaState(TypedDict):
     # ── Input desde Streamlit ─────────────────────────────────────────────────
     seccion_objetivo:       str
     contexto_recuperado:    str   # RAG tesis — sección objetivo
-    contexto_dependencias:  str   # RAG tesis — secciones relacionadas (cruzado)
+    contexto_dependencias:  str   # RAG tesis — secciones relacionadas
     contexto_teorico:       str   # RAG biblioteca de libros
 
-    # ── Configuración del ciclo (inyectada por Streamlit) ─────────────────────
-    max_iteraciones:        int   # Límite de ciclos principales (default 3)
-    max_rondas_debate:      int   # Límite de rondas de debate por ciclo (default 2)
+    # ── Rúbrica dinámica (subida por el estudiante) ───────────────────────────
+    # Si es None, el Auditor usa la rúbrica UPAO hardcodeada en config.py
+    rubrica_dinamica:       Optional[Any]   # dict parseado por rubric_parser.py
+
+    # ── Configuración del ciclo ───────────────────────────────────────────────
+    max_iteraciones:        int
+    max_rondas_debate:      int
 
     # ── Supervisor ────────────────────────────────────────────────────────────
-    plan_supervisor:        str   # Análisis del Supervisor al inicio del ciclo
+    plan_supervisor:        str
 
     # ── Redactor ──────────────────────────────────────────────────────────────
     texto_iterado:          str
@@ -44,6 +48,12 @@ class MentoriaState(TypedDict):
     # ── Metodólogo (rigor científico + coherencia cruzada) ────────────────────
     observaciones_metodologicas: str
 
+    # ── Consenso / Disenso ────────────────────────────────────────────────────
+    resultado_consenso:     str   # síntesis de acuerdos entre evaluadores
+    resultado_disenso:      str   # conflictos entre evaluadores
+    iter_consenso:          int   # iteración en que corrió el nodo consenso
+    iter_disenso:           int   # iteración en que corrió el nodo disenso
+
     # ── Debate ────────────────────────────────────────────────────────────────
     ronda_debate:           int
     historial_debate:       List[RondaDebate]
@@ -54,11 +64,15 @@ class MentoriaState(TypedDict):
     aprobacion_humana:      Optional[str]
 
     # ── Red multiagente — routing dinámico del Supervisor ────────────────────
-    siguiente_nodo:           str   # decisión del Supervisor → siguiente agente
-    instrucciones_supervisor: str   # nota del Supervisor para el siguiente agente
-    pasos_ejecutados:         int   # contador total de pasos (anti-bucle)
-    max_pasos_red:            int   # techo de pasos (inyectado por Streamlit)
+    siguiente_nodo:           str
+    instrucciones_supervisor: str
+    pasos_ejecutados:         int
+    max_pasos_red:            int
 
-    # Rastreo por iteración (el Supervisor los lee para decidir quién ya corrió)
-    iter_auditada:            int   # numero_iteracion cuando el Auditor ejecutó por última vez
-    iter_metodologica:        int   # numero_iteracion cuando el Metodólogo ejecutó por última vez
+    # Rastreo por iteración
+    iter_auditada:            int   # última iteración en que corrió el Auditor
+    iter_metodologica:        int   # última iteración en que corrió el Metodólogo
+
+    # ── Reportes generados al aprobar ────────────────────────────────────────
+    rutas_reportes:           Optional[List[str]]  # [ruta_metricas.json, ruta_debate.md]
+    _puntaje_max:             Optional[int]         # puntaje máximo de la rúbrica activa

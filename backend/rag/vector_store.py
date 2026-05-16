@@ -18,6 +18,7 @@ NOTA ANTI-TOKEN-BURN:
 
 import io
 import os
+import re
 import logging
 from typing import List, Optional
 
@@ -33,6 +34,22 @@ logger = logging.getLogger(__name__)
 
 # ── Constantes ────────────────────────────────────────────────────────────────
 MODELO_EMBEDDING = "sentence-transformers/all-MiniLM-L6-v2"
+
+# ── Filtro de chunks de índice/TOC ────────────────────────────────────────────
+_RE_LINEA_INDICE = re.compile(r'\.{4,}\s*\d{1,4}\s*$')
+
+def _es_chunk_indice(texto: str) -> bool:
+    """Detecta si un chunk es principalmente una tabla de contenidos o índice.
+
+    Heurística: si ≥35 % de las líneas no vacías tienen el patrón
+    'texto ......... N' (puntos seguidos de número al final), es un fragmento
+    de índice que no aporta contenido real al RAG.
+    """
+    lineas = [l for l in texto.split('\n') if l.strip()]
+    if not lineas:
+        return False
+    lineas_indice = sum(1 for l in lineas if _RE_LINEA_INDICE.search(l.strip()))
+    return lineas_indice / len(lineas) >= 0.35
 CHUNK_SIZE       = 600    # chars por fragmento
 CHUNK_OVERLAP    = 80     # solapamiento entre fragmentos
 K_RESULTADOS     = 4      # fragmentos a recuperar por consulta
@@ -101,7 +118,12 @@ def construir_vector_store(
         [texto],
         metadatas=[{"source": collection_name, "tipo": "proyecto_tesis"}],
     )
-    logger.info(f"Texto dividido en {len(documentos)} fragmentos (chunk_size={CHUNK_SIZE})")
+    antes = len(documentos)
+    documentos = [d for d in documentos if not _es_chunk_indice(d.page_content)]
+    logger.info(
+        f"Texto dividido: {antes} fragmentos totales → {len(documentos)} útiles "
+        f"({antes - len(documentos)} chunks de índice/TOC filtrados)"
+    )
 
     # ChromaDB en memoria — no escribe en disco, se reinicia con el servidor
     cliente_chroma = chromadb.EphemeralClient()

@@ -19,8 +19,12 @@ _DEFAULTS: dict = {
     "vector_store":          None,       # ChromaDB ephemeral (tesis del estudiante)
     "pdf_hash":              None,
     "pdf_nombre":            None,
+    "rubrica_dinamica":      None,       # dict parseado por rubric_parser (None = usa UPAO)
+    "rubrica_hash":          None,
+    "rubrica_nombre":        None,
     "error_msg":             None,
-    "libro_subido_feedback": None,       # Mensaje temporal tras subir/eliminar un libro
+    "libro_subido_feedback": None,
+    "estructura_toc":        None,   # dict {nombre_seccion: n_pagina} detectado del índice
 }
 
 
@@ -33,12 +37,16 @@ def init_session() -> None:
 
 def reset_todo() -> None:
     """Reinicia toda la sesión para comenzar una nueva evaluación desde cero."""
-    st.session_state.thread_id    = str(uuid.uuid4())
-    st.session_state.graph_status = "initial"
-    st.session_state.vector_store = None
-    st.session_state.pdf_hash     = None
-    st.session_state.pdf_nombre   = None
-    st.session_state.error_msg    = None
+    st.session_state.thread_id       = str(uuid.uuid4())
+    st.session_state.graph_status    = "initial"
+    st.session_state.vector_store    = None
+    st.session_state.pdf_hash        = None
+    st.session_state.pdf_nombre      = None
+    st.session_state.rubrica_dinamica = None
+    st.session_state.rubrica_hash    = None
+    st.session_state.rubrica_nombre  = None
+    st.session_state.error_msg       = None
+    st.session_state.estructura_toc  = None
 
 
 def reset_solo_grafo() -> None:

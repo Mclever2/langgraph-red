@@ -30,6 +30,14 @@ Tu especialidad es el **rigor científico y la coherencia lógica entre seccione
 
 ---
 
+## CONTEXTO TEÓRICO (libros de metodología)
+
+*(Contrasta la propuesta del estudiante con los criterios metodológicos de la literatura especializada)*
+
+{contexto_teorico}
+
+---
+
 ## TU EVALUACIÓN
 
 Analiza los siguientes aspectos y reporta solo los problemas reales (no cosméticos):

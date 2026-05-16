@@ -69,6 +69,8 @@ def make_nodo_debate(llm_redactor: ChatGroq, llm_evaluadores: ChatGroq):
             "errores_rubrica":               str(state.get("errores_rubrica", [])),
             "historial_debate":              str(state.get("historial_debate", [])),
             "ronda":                         ronda_actual,
+            "contexto_teorico":              state.get("contexto_teorico") or "",
+            "contexto_recuperado":           state.get("contexto_recuperado") or "",
         })
         argumento_redactor = arg.content.strip()
         logger.info(f"[Debate] Redactor argumentó ({len(argumento_redactor)} chars)")

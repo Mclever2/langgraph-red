@@ -9,7 +9,15 @@ de routing vive en el LLM del Supervisor (nodes/supervisor.py).
 from .state import MentoriaState
 
 # Destinos válidos que el Supervisor puede elegir
-DESTINOS_VALIDOS = {"redactor", "auditor", "metodologico", "debate", "humano"}
+DESTINOS_VALIDOS = {
+    "redactor",
+    "auditor",
+    "metodologico",
+    "debate",
+    "consenso",
+    "disenso",
+    "humano",
+}
 
 
 def routing_supervisor(state: MentoriaState) -> str:

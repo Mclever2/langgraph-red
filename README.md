@@ -301,6 +301,21 @@ El mentor puede **editar el texto** directamente en el editor antes de:
 | **Metodólogo** | `nodes/metodologico.py` | `llama-3.3-70b` temp=0.2 | Evalúa el rigor científico y la coherencia entre secciones relacionadas del documento |
 | **Debate** | `nodes/debate.py` | `llama-3.3-70b` temp=0.3 | Intercambio argumentativo: Redactor defiende sus decisiones, Evaluadores responden con veredicto Pydantic (`VeredictoEvaluadores`). Actualiza `errores_rubrica` aceptando o manteniendo cada ítem |
 
+---
+
+## Documentación funcional de nodos
+
+| Nodo | Archivo | Funcionalidad |
+|---|---|---|
+| `nodo_supervisor` | `nodes/supervisor.py` | Orquesta la red leyendo el estado completo y decidiendo determinísticamente qué agente ejecutar a continuación, con protección anti-bucle por contador de pasos. |
+| `nodo_redactor` | `nodes/redactor.py` | Reescribe el texto académico de la sección integrando el plan del supervisor, el feedback del auditor, las observaciones del metodólogo y contexto recuperado por RAG. |
+| `nodo_auditor` | `nodes/auditor.py` | Evalúa el texto ítem por ítem contra la rúbrica UPAO de 33 criterios (escala 0–3) y emite una lista de errores bloqueantes con puntuación total. |
+| `nodo_metodologico` | `nodes/metodologico.py` | Analiza el rigor científico del texto y su coherencia con las secciones dependientes del documento (variables, hipótesis, diseño, instrumentos). |
+| `nodo_consenso` | `nodes/consenso.py` | Sintetiza los puntos de acuerdo entre el Auditor y el Metodólogo para identificar los errores compartidos más críticos antes del debate. |
+| `nodo_disenso` | `nodes/disenso.py` | Detecta las contradicciones entre las evaluaciones del Auditor y el Metodólogo y propone cómo resolverlas antes de que el Redactor intervenga. |
+| `nodo_debate` | `nodes/debate.py` | Ejecuta una ronda argumentativa en la que el Redactor defiende sus decisiones y los Evaluadores emiten un veredicto estructurado que puede cerrar errores o mantenerlos. |
+| `nodo_humano` | `nodes/human.py` | Pausa el grafo para que el mentor revise, edite y apruebe o rechace el texto final, y genera los reportes de métricas y transcript de debate al aprobar. |
+
 ### Estado compartido (`MentoriaState`)
 
 Todos los agentes leen y escriben en un `TypedDict` centralizado con persistencia via `MemorySaver`:
@@ -329,6 +344,98 @@ MentoriaState:
   # HITL
   aprobacion_humana
 ```
+
+---
+
+## Reglas de consenso y disenso entre agentes
+
+Después de que el **Auditor** y el **Metodólogo** completan sus evaluaciones en cada ciclo, el Supervisor activa obligatoriamente dos nodos de arbitraje antes de pasar al debate: **Consenso** (Fase 3) y **Disenso** (Fase 4). Ambos reciben las mismas entradas y producen síntesis complementarias que informan al Supervisor y al nodo Debate.
+
+### Cuándo se activan
+
+```
+Ciclo N:
+  Fase 1 → Auditor       (evalúa rúbrica 33 ítems)
+  Fase 2 → Metodólogo    (evalúa rigor y coherencia cruzada)
+  Fase 3 → Consenso      (obligatorio: sintetiza acuerdos)
+  Fase 4 → Disenso       (obligatorio: sintetiza conflictos)
+  Fase 5 → Debate        (si hay errores y rondas disponibles)
+  Fase 6 → Redactor      (aplica correcciones al texto)
+  Fase 7 → Humano        (si 0 errores o ciclos agotados)
+```
+
+El Supervisor detecta si cada fase ya corrió en el ciclo actual comparando el contador `iter_xxx` con `numero_iteracion`. Si `iter_consenso > numero_iteracion`, el Consenso ya corrió y se pasa al Disenso, y así sucesivamente.
+
+---
+
+### Nodo Consenso — Reglas de análisis
+
+Recibe: `feedback_auditor` + `observaciones_metodologicas` + `texto_iterado`
+
+Analiza cuatro dimensiones:
+
+| Dimensión | Qué busca |
+|---|---|
+| **Acuerdos explícitos** | Aspectos que **ambos** agentes señalan como problemáticos o correctos, usando los mismos términos. |
+| **Convergencia temática** | Aunque usen términos distintos, ¿apuntan al mismo problema de fondo? (ej. Auditor dice "sin hipótesis formal", Metodólogo dice "relación causal no establecida"). |
+| **Fortalezas consensuadas** | Aspectos que ambos reconocen como bien logrados — no se tocan en el debate. |
+| **Prioridad de corrección** | El error más crítico según los dos evaluadores, expresado en una sola oración accionable para el Redactor. |
+
+Salida → `resultado_consenso`: narrativa estructurada con secciones `ACUERDOS DETECTADOS`, `FORTALEZAS CONSENSUADAS` y `PRIORIDAD DE CORRECCIÓN CONSENSUADA`.
+
+---
+
+### Nodo Disenso — Reglas de análisis
+
+Recibe: `feedback_auditor` + `observaciones_metodologicas` + `texto_iterado` + `n_errores`
+
+Analiza cuatro dimensiones:
+
+| Dimensión | Qué busca |
+|---|---|
+| **Conflictos directos** | Ítems donde uno aprueba y el otro rechaza, o donde sus recomendaciones son contradictorias. |
+| **Divergencia de enfoque** | El Auditor prioriza formato/estructura (rúbrica formal); el Metodólogo prioriza rigor lógico. Detecta tensión entre ambas prioridades. |
+| **Brechas de evaluación** | Aspectos que solo uno de los dos agentes evaluó — zonas ciegas de la evaluación. |
+| **Recomendación para el Supervisor** | En 1-2 oraciones: qué criterio (formal o metodológico) debe pesar más para esta sección específica y por qué. |
+
+Salida → `resultado_disenso`: narrativa estructurada con secciones `CONFLICTOS DETECTADOS`, `BRECHAS DE EVALUACIÓN` y `RECOMENDACIÓN PARA EL SUPERVISOR`.
+
+---
+
+### Cómo usan sus salidas los nodos siguientes
+
+```
+Consenso + Disenso
+       │
+       ├──→ Debate (nodo_debate)
+       │      ├─ Redactor usa: errores_rubrica (filtrados por el consenso como críticos)
+       │      │                contexto_teorico, historial_debate anterior
+       │      └─ Evaluadores usan: feedback_auditor + observaciones_metodologicas
+       │
+       └──→ Supervisor (fallback LLM)
+              └─ resultado_consenso + resultado_disenso como campos del estado
+                 para informar el routing cuando no aplica ninguna fase determinista
+```
+
+**El Consenso no modifica `errores_rubrica` directamente** — solo prioriza. Los errores se eliminan únicamente cuando el nodo Debate emite un veredicto `"aceptado"` para un ítem.
+
+---
+
+### Reglas del Debate (mecanismo de resolución de errores)
+
+El debate es la única instancia donde un error bloqueante puede cerrarse sin que el Redactor reescriba el texto:
+
+| Paso | Quién actúa | Qué hace |
+|---|---|---|
+| **1. Argumento** | Redactor | Para cada crítica: acepta (con corrección propuesta en texto), cuestiona (señala dónde ya está en el texto) o propone alternativa (con texto concreto). |
+| **2. Veredicto** | Panel evaluador (Auditor + Metodólogo, llamada conjunta) | Emite `"aceptado"` o `"mantenido"` por cada ítem con razón explícita. |
+| **3. Actualización** | `nodo_debate` (código) | Elimina de `errores_rubrica` los ítems con veredicto `"aceptado"`. |
+
+**Reglas del veredicto (hardcodeadas en el prompt de evaluadores):**
+1. Se acepta si el Redactor demuestra que el elemento ya está presente en el texto con referencia concreta.
+2. Se mantiene si la crítica está sustentada en la rúbrica UPAO o en principios metodológicos sólidos.
+3. Si el argumento es parcialmente válido → se mantiene el error pero se reconoce el punto válido.
+4. La coherencia cruzada entre secciones es **no negociable** — si hay incoherencia real, no se acepta el argumento.
 
 ---
 

@@ -21,7 +21,7 @@ from backend.graph.workflow import create_graph
 logger = logging.getLogger(__name__)
 
 
-@st.cache_resource(show_spinner="Cargando modelo de embeddings (primera vez ~80 MB)…")
+@st.cache_resource(show_spinner="Cargando modelo de embeddings multilingual-e5-small (primera vez ~117 MB)…")
 def _get_embeddings():
     """Carga el modelo HuggingFace UNA sola vez (~80 MB en la primera ejecución)."""
     return cargar_modelo_embeddings()

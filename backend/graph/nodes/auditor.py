@@ -1,5 +1,8 @@
 """
-Nodo Auditor — Evalúa el texto contra los ítems REALES de la rúbrica oficial UPAO.
+Nodo Auditor — Evalúa el texto contra la rúbrica activa.
+
+Si el estudiante subió su propia rúbrica (state["rubrica_dinamica"]),
+la usa para evaluar. De lo contrario, usa la rúbrica oficial UPAO de config.py.
 
 Usa with_structured_output(AuditorOutput) para garantizar JSON válido y tipado.
 Incluye sleep(3) obligatorio anti-rate-limit para la API gratuita de Groq.
@@ -16,16 +19,17 @@ from pydantic import BaseModel, Field
 from ..state import MentoriaState
 from ._utils import cargar_prompt, invocar_con_backoff
 from backend.config import get_items_texto_para_seccion, get_puntaje_maximo_seccion
+from backend.rag.rubric_parser import rubrica_a_texto_prompt
 
 logger = logging.getLogger(__name__)
 
 
-# ── Modelos Pydantic para la salida estructurada ──────────────────────────────
+# ── Modelos Pydantic para salida estructurada ─────────────────────────────────
 
 class ItemEvaluado(BaseModel):
-    """Evaluación de un ítem individual de la rúbrica UPAO."""
-    item_numero: int = Field(ge=1, le=33, description="Número del ítem (01-33)")
-    puntaje:     int = Field(ge=0, le=3,  description="0=Insuficiente 1=Regular 2=Bueno 3=Excelente")
+    """Evaluación de un ítem individual de la rúbrica."""
+    item_numero: int = Field(ge=1, le=999, description="Número del ítem de la rúbrica")
+    puntaje:     int = Field(ge=0, le=3,   description="0=Insuficiente 1=Regular 2=Bueno 3=Excelente")
     observacion: str = Field(description="Observación específica para este ítem")
 
 
@@ -51,45 +55,58 @@ def make_nodo_auditor(llm: ChatGroq):
     """
     Fábrica del Nodo Auditor.
 
-    Evalúa el texto del Redactor contra los ítems EXACTOS de la rúbrica oficial
-    UPAO (Ficha de Evaluación de Proyecto de Tesis — Facultad de Ingeniería).
+    Evalúa el texto contra la rúbrica activa:
+    - Rúbrica dinámica del estudiante (si fue subida)
+    - Rúbrica UPAO hardcodeada (fallback)
 
     Usa with_structured_output(AuditorOutput) para garantizar JSON válido.
-    Incluye sleep(3) obligatorio para no saturar los TPM de la API gratuita de Groq.
     """
     plantilla_sistema = cargar_prompt("auditor_prompt.md")
     llm_estructurado  = llm.with_structured_output(AuditorOutput)
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", plantilla_sistema),
-        ("human", "Evalúa el texto y devuelve tu evaluación estructurada según la rúbrica UPAO."),
+        ("human", "Evalúa el texto y devuelve tu evaluación estructurada según la rúbrica."),
     ])
     chain = prompt | llm_estructurado
 
     def nodo_auditor(state: MentoriaState) -> dict:
-        # ── Pausa obligatoria anti-rate-limit ─────────────────────────────────
         logger.info("[Auditor] Pausa 3 s anti-rate-limit...")
         time.sleep(3)
 
-        seccion = state["seccion_objetivo"]
+        seccion  = state["seccion_objetivo"]
+        n_iter   = state.get("numero_iteracion", 0)
+        rubrica  = state.get("rubrica_dinamica")
+
+        # Evalúa texto_iterado si existe, sino el texto original del PDF
+        texto_a_evaluar = state.get("texto_iterado") or state.get("contexto_recuperado", "")
+        fuente_texto    = "mejorado" if state.get("texto_iterado") else "original del PDF"
+
         logger.info(
-            f"[Auditor] Evaluando iteración #{state.get('numero_iteracion', 1)} "
-            f"| Sección: {seccion}"
+            f"[Auditor] Ciclo {n_iter} | Sección: {seccion} | "
+            f"Texto: {fuente_texto} | Rúbrica: {'dinámica' if rubrica else 'UPAO'}"
         )
 
-        # Construir la tabla de ítems relevantes para esta sección
-        items_texto = get_items_texto_para_seccion(seccion)
-        puntaje_max = get_puntaje_maximo_seccion(seccion)
+        # ── Construir tabla de ítems y puntaje máximo ─────────────────────────
+        if rubrica:
+            items_texto  = rubrica_a_texto_prompt(rubrica)
+            puntaje_max  = rubrica.get("puntaje_maximo", len(rubrica.get("items", [])) * 3)
+            rubrica_desc = "rúbrica subida por el estudiante"
+        else:
+            items_texto  = get_items_texto_para_seccion(seccion)
+            puntaje_max  = get_puntaje_maximo_seccion(seccion)
+            rubrica_desc = "rúbrica oficial UPAO"
 
         resultado: AuditorOutput = invocar_con_backoff(chain, {
-            "seccion":                  seccion,
-            "texto_iterado":            state["texto_iterado"],
-            "items_rubrica":            items_texto,
-            "puntaje_max":              puntaje_max,
-            "contexto_dependencias":    state.get("contexto_dependencias") or "Sin contexto de secciones relacionadas.",
+            "seccion":               seccion,
+            "texto_iterado":         texto_a_evaluar,
+            "items_rubrica":         items_texto,
+            "puntaje_max":           puntaje_max,
+            "rubrica_descripcion":   rubrica_desc,
+            "contexto_dependencias": state.get("contexto_dependencias") or "Sin contexto de secciones relacionadas.",
+            "contexto_teorico":      state.get("contexto_teorico") or "",
         })
 
-        # Solo ítems con puntaje < 2 se consideran "errores" a corregir
         errores = [
             {
                 "item_numero":    item.item_numero,
@@ -110,8 +127,9 @@ def make_nodo_auditor(llm: ChatGroq):
             "feedback_auditor": resultado.feedback_general,
             "errores_rubrica":  errores,
             "puntaje_estimado": resultado.puntaje_total,
-            # Informa al Supervisor que el Auditor ya corrió en esta iteración
-            "iter_auditada":    state.get("numero_iteracion", 1),
+            # iter_auditada = n_iter + 1 para que auditor_ok = iter > n_iter
+            "iter_auditada":    n_iter + 1,
+            "_puntaje_max":     puntaje_max,
         }
 
     return nodo_auditor

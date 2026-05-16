@@ -1,4 +1,4 @@
-.env.example
+
 .env
 
 **/__pycache__/
@@ -6,3 +6,5 @@
 
 chroma_db/
 books/
+logs/
+venv/

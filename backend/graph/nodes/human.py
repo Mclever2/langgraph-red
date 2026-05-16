@@ -11,7 +11,8 @@ Flujo HITL en Streamlit:
   4. Streamlit llama a graph.update_state(config, {aprobacion_humana, texto_iterado})
   5. graph.invoke(None, config) reanuda → este nodo ejecuta → END
 
-Este nodo NO modifica el estado: la decisión ya fue inyectada por Streamlit.
+Al ejecutarse (post-aprobación), calcula y guarda las métricas de coherencia
+en backend/logs/ para uso del investigador.
 """
 
 import logging
@@ -25,9 +26,26 @@ def nodo_humano(state: MentoriaState) -> dict:
     """
     Nodo de revisión humana (Human-in-the-Loop).
 
-    No realiza ninguna transformación: solo registra la decisión que
-    Streamlit ya inyectó con graph.update_state() antes de reanudar.
+    Registra la decisión que Streamlit inyectó con update_state(),
+    y al completarse calcula las métricas de coherencia multiagente.
     """
     aprobacion = state.get("aprobacion_humana", "aprobado")
     logger.info(f"[Humano] Decisión registrada: {aprobacion}")
-    return {"aprobacion_humana": aprobacion}
+
+    # ── Reportes al aprobar (métricas JSON + transcripción Markdown del debate) ─
+    rutas: list = []
+    if aprobacion == "aprobado":
+        try:
+            from backend.metrics.coherencia import (
+                calcular_y_guardar_coherencia,
+                generar_transcripcion_debate,
+            )
+            estado_dict = dict(state)
+            ruta_metricas = calcular_y_guardar_coherencia(estado_dict)
+            ruta_debate   = generar_transcripcion_debate(estado_dict)
+            rutas = [ruta_metricas, ruta_debate]
+            logger.info(f"[Humano] Reportes generados → {rutas}")
+        except Exception as exc:
+            logger.warning(f"[Humano] No se pudieron generar reportes: {exc}")
+
+    return {"aprobacion_humana": aprobacion, "rutas_reportes": rutas or None}

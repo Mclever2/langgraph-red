@@ -27,25 +27,30 @@ def make_nodo_metodologico(llm: ChatGroq):
     chain = prompt | llm
 
     def nodo_metodologico(state: MentoriaState) -> dict:
-        logger.info(f"[Metodólogo] Pausa 5s anti-rate-limit (paralelo con Auditor)...")
+        logger.info(f"[Metodólogo] Pausa 5s anti-rate-limit...")
         time.sleep(5)
 
         seccion = state["seccion_objetivo"]
-        logger.info(f"[Metodólogo] Evaluando coherencia | Sección: {seccion}")
+        n_iter  = state.get("numero_iteracion", 0)
+
+        # Evalúa el texto actual: mejorado si existe, original del PDF si no
+        texto_a_evaluar = state.get("texto_iterado") or state.get("contexto_recuperado", "")
+        fuente_texto    = "mejorado" if state.get("texto_iterado") else "original del PDF"
+        logger.info(f"[Metodólogo] Ciclo {n_iter} | Texto: {fuente_texto} | Sección: {seccion}")
 
         respuesta = invocar_con_backoff(chain, {
             "seccion":                  seccion,
-            "texto_iterado":            state["texto_iterado"],
+            "texto_iterado":            texto_a_evaluar,
             "contexto_dependencias":    state.get("contexto_dependencias") or "Sin contexto de secciones relacionadas.",
-            "contexto_recuperado":      state["contexto_recuperado"],
-            "numero_iteracion":         state.get("numero_iteracion", 1),
+            "contexto_recuperado":      state.get("contexto_recuperado", ""),
+            "contexto_teorico":         state.get("contexto_teorico") or "",
+            "numero_iteracion":         n_iter,
         })
 
         logger.info(f"[Metodólogo] Evaluación completada ({len(respuesta.content)} chars)")
         return {
             "observaciones_metodologicas": respuesta.content.strip(),
-            # Informa al Supervisor que el Metodólogo ya corrió en esta iteración
-            "iter_metodologica": state.get("numero_iteracion", 1),
+            "iter_metodologica":           n_iter + 1,
         }
 
     return nodo_metodologico
