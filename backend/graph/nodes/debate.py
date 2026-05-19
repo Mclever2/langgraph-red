@@ -1,19 +1,23 @@
 """
-Nodo Debate — Intercambio argumentativo entre el Redactor y los Evaluadores.
+ARCHIVO OBSOLETO — Reemplazado por debate_auditor.py y debate_metodologo.py
 
-Flujo de una ronda:
-  1. Redactor argumenta sus decisiones y responde las críticas del Auditor y Metodólogo
-  2. Evaluadores (Auditor + Metodólogo, en una sola llamada conjunta) emiten veredicto:
-     - Aceptan o mantienen cada crítica con razones explícitas
-     - Actualizan la lista de errores bloqueantes
+El debate ahora es inter-agente real: dos nodos separados en el grafo
+que se comunican exclusivamente a través del estado compartido (MentoriaState).
 
-El nodo se ejecuta en BUCLE PROPIO controlado por ronda_debate < max_rondas_debate.
-Este bucle es independiente del bucle principal de iteraciones.
+  - debate_auditor.py   → nodo_debate_auditor   (Auditor escribe al estado)
+  - debate_metodologo.py → nodo_debate_metodologo (Metodólogo lee del estado)
+
+Flujo en el grafo:
+  Supervisor → nodo_debate_auditor  → Supervisor
+  Supervisor → nodo_debate_metodologo → Supervisor
+
+Este archivo ya no es importado por nodes/__init__.py ni por workflow.py.
 """
 
 import time
 import logging
 from typing import List
+
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
@@ -24,34 +28,47 @@ from ._utils import cargar_prompt, invocar_con_backoff
 logger = logging.getLogger(__name__)
 
 
-class ItemVeredicto(BaseModel):
-    item_numero:  int = Field(description="Número del ítem de la rúbrica")
-    decision:     str = Field(description="'aceptado' si el argumento es válido, 'mantenido' si el error persiste")
-    razon:        str = Field(description="Razón de la decisión")
+class ItemResolucion(BaseModel):
+    item_numero: int = Field(description="Número del ítem de la rúbrica")
+    decision: str = Field(
+        description="'confirmado' si el error es real y debe corregirse, "
+                    "'descartado' si el argumento del Auditor no tiene base metodológica suficiente"
+    )
+    razon: str = Field(description="Razón metodológica de la decisión (1-2 oraciones)")
 
 
-class VeredictoEvaluadores(BaseModel):
-    items_veredicto:    List[ItemVeredicto] = Field(description="Veredicto ítem por ítem")
-    respuesta_narrativa: str = Field(description="Respuesta narrativa completa al argumento del Redactor")
-    errores_resueltos:  List[int] = Field(description="Números de ítems que se dan por resueltos tras el argumento")
-    errores_mantenidos: List[int] = Field(description="Números de ítems que siguen siendo errores bloqueantes")
+class ResolucionDebate(BaseModel):
+    items_resolucion: List[ItemResolucion] = Field(
+        description="Resolución ítem por ítem de todos los errores argumentados"
+    )
+    posicion_metodologica: str = Field(
+        description="Respuesta narrativa completa del Metodólogo al argumento del Auditor"
+    )
+    items_confirmados: List[int] = Field(
+        description="Números de ítems confirmados como errores reales que el Redactor debe corregir"
+    )
+    items_descartados: List[int] = Field(
+        description="Números de ítems descartados — no son errores reales o no tienen base suficiente"
+    )
 
 
-def make_nodo_debate(llm_redactor: ChatGroq, llm_evaluadores: ChatGroq):
-    # Prompt del Redactor argumentando
-    prompt_redactor = ChatPromptTemplate.from_messages([
-        ("system", cargar_prompt("debate_redactor_prompt.md")),
-        ("human", "Argumenta tus decisiones para la ronda {ronda} del debate sobre la sección '{seccion}'."),
+def make_nodo_debate(llm_auditor: ChatGroq, llm_metodologico: ChatGroq):
+    """
+    Fábrica del Nodo Debate.
+    El Auditor argumenta sus hallazgos; el Metodólogo responde con veredicto estructurado.
+    """
+    prompt_auditor = ChatPromptTemplate.from_messages([
+        ("system", cargar_prompt("debate_auditor_prompt.md")),
+        ("human", "Defiende tus hallazgos en la ronda {ronda} del debate sobre '{seccion}'."),
     ])
-    chain_redactor = prompt_redactor | llm_redactor
+    chain_auditor = prompt_auditor | llm_auditor
 
-    # Prompt de los Evaluadores respondiendo (Pydantic structured output)
-    llm_eval_estructurado = llm_evaluadores.with_structured_output(VeredictoEvaluadores)
-    prompt_evaluadores = ChatPromptTemplate.from_messages([
-        ("system", cargar_prompt("debate_evaluadores_prompt.md")),
-        ("human", "Emite el veredicto conjunto sobre el argumento del Redactor en la ronda {ronda}."),
+    llm_metod_estructurado = llm_metodologico.with_structured_output(ResolucionDebate)
+    prompt_metodologico = ChatPromptTemplate.from_messages([
+        ("system", cargar_prompt("debate_metodologico_prompt.md")),
+        ("human", "Emite tu resolución sobre los argumentos del Auditor en la ronda {ronda}."),
     ])
-    chain_evaluadores = prompt_evaluadores | llm_eval_estructurado
+    chain_metodologico = prompt_metodologico | llm_metod_estructurado
 
     def nodo_debate(state: MentoriaState) -> dict:
         ronda_actual = state.get("ronda_debate", 0) + 1
@@ -60,65 +77,62 @@ def make_nodo_debate(llm_redactor: ChatGroq, llm_evaluadores: ChatGroq):
             f"Sección: {state['seccion_objetivo']}"
         )
 
-        # ── PASO 1: Redactor argumenta ────────────────────────────────────────
-        arg = invocar_con_backoff(chain_redactor, {
-            "seccion":                       state["seccion_objetivo"],
-            "texto_iterado":                 state["texto_iterado"],
-            "feedback_auditor":              state.get("feedback_auditor", ""),
-            "observaciones_metodologicas":   state.get("observaciones_metodologicas", ""),
-            "errores_rubrica":               str(state.get("errores_rubrica", [])),
-            "historial_debate":              str(state.get("historial_debate", [])),
-            "ronda":                         ronda_actual,
-            "contexto_teorico":              state.get("contexto_teorico") or "",
-            "contexto_recuperado":           state.get("contexto_recuperado") or "",
+        texto_actual = state.get("texto_iterado") or state.get("contexto_recuperado", "")
+
+        # ── PASO 1: Auditor defiende sus hallazgos ────────────────────────────
+        arg = invocar_con_backoff(chain_auditor, {
+            "seccion":          state["seccion_objetivo"],
+            "texto_iterado":    texto_actual,
+            "errores_rubrica":  str(state.get("errores_rubrica", [])),
+            "feedback_auditor": state.get("feedback_auditor", ""),
+            "historial_debate": str(state.get("historial_debate", [])),
+            "ronda":            ronda_actual,
         })
-        argumento_redactor = arg.content.strip()
-        logger.info(f"[Debate] Redactor argumentó ({len(argumento_redactor)} chars)")
+        argumento_auditor = arg.content.strip()
+        logger.info(f"[Debate] Auditor argumentó ({len(argumento_auditor)} chars)")
 
         # ── Pausa anti-rate-limit ─────────────────────────────────────────────
         time.sleep(5)
 
-        # ── PASO 2: Evaluadores responden con veredicto estructurado ─────────
-        veredicto: VeredictoEvaluadores = invocar_con_backoff(chain_evaluadores, {
+        # ── PASO 2: Metodólogo responde con resolución estructurada ──────────
+        resolucion: ResolucionDebate = invocar_con_backoff(chain_metodologico, {
             "seccion":                       state["seccion_objetivo"],
-            "texto_iterado":                 state["texto_iterado"],
-            "argumento_redactor":            argumento_redactor,
+            "texto_iterado":                 texto_actual,
+            "argumento_auditor":             argumento_auditor,
             "errores_rubrica":               str(state.get("errores_rubrica", [])),
             "observaciones_metodologicas":   state.get("observaciones_metodologicas", ""),
             "feedback_auditor":              state.get("feedback_auditor", ""),
             "ronda":                         ronda_actual,
         })
 
-        # ── Actualizar errores_rubrica (eliminar los aceptados) ───────────────
+        # ── Actualizar errores_rubrica (eliminar los descartados) ─────────────
         errores_actuales: List[ErrorRubrica] = state.get("errores_rubrica", [])
-        errores_resueltos = set(veredicto.errores_resueltos)
+        items_descartados = set(resolucion.items_descartados)
         errores_actualizados = [
             e for e in errores_actuales
-            if e["item_numero"] not in errores_resueltos
+            if e["item_numero"] not in items_descartados
         ]
 
         logger.info(
             f"[Debate] Ronda {ronda_actual}: "
-            f"{len(errores_resueltos)} errores aceptados, "
-            f"{len(errores_actualizados)} mantenidos"
+            f"{len(items_descartados)} descartados · "
+            f"{len(errores_actualizados)} errores pendientes"
         )
 
-        # ── Actualizar historial ──────────────────────────────────────────────
+        # ── Registrar ronda en historial ──────────────────────────────────────
         historial: List[RondaDebate] = list(state.get("historial_debate", []))
         historial.append({
-            "ronda":                 ronda_actual,
-            "argumento_redactor":    argumento_redactor,
-            "veredicto_evaluadores": veredicto.respuesta_narrativa,
-            "items_aceptados":       list(veredicto.errores_resueltos),
-            "items_mantenidos":      list(veredicto.errores_mantenidos),
+            "ronda":                  ronda_actual,
+            "argumento_auditor":      argumento_auditor,
+            "respuesta_metodologico": resolucion.posicion_metodologica,
+            "items_confirmados":      list(resolucion.items_confirmados),
+            "items_descartados":      list(resolucion.items_descartados),
         })
 
         return {
-            "ronda_debate":       ronda_actual,
-            "historial_debate":   historial,
-            "argumento_redactor": argumento_redactor,
-            "veredicto_debate":   veredicto.respuesta_narrativa,
-            "errores_rubrica":    errores_actualizados,
+            "ronda_debate":     ronda_actual,
+            "historial_debate": historial,
+            "errores_rubrica":  errores_actualizados,
         }
 
     return nodo_debate

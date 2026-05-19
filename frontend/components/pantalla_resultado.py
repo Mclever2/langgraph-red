@@ -41,6 +41,8 @@ def render_pantalla_resultado() -> None:
     st.divider()
     _render_texto_final(v, seccion)
     st.divider()
+    _render_metricas_nlp(st.session_state.get("thread_id", ""))
+    st.divider()
     _render_resumen_proceso(v, rubrica)
     st.divider()
     _render_botones_finales()
@@ -241,6 +243,40 @@ def _render_resumen_proceso(v: dict, rubrica) -> None:
         st.caption(
             "Los archivos JSON y Markdown también están disponibles en `backend/logs/`."
         )
+
+
+def _render_metricas_nlp(run_id: str) -> None:
+    """Muestra métricas NLP del evaluador determinístico (ROUGE, BLEU, coseno, kappa, gain)."""
+    if not run_id:
+        st.caption("Métricas NLP no disponibles para esta sesión.")
+        return
+
+    ruta = f"./outputs/run_{run_id}.json"
+    if not os.path.isfile(ruta):
+        st.caption("Métricas NLP no disponibles para esta sesión.")
+        return
+
+    try:
+        from evaluator.evaluator import evaluar_desde_archivo
+        resultado = evaluar_desde_archivo(ruta)
+        m = resultado.get("metricas", {})
+
+        st.subheader("Métricas NLP del Proceso")
+
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("ROUGE-1 F", f"{m.get('rouge1_f', 0):.4f}", help="Solapamiento de unigramas entre texto inicial y mejorado")
+        col2.metric("ROUGE-2 F", f"{m.get('rouge2_f', 0):.4f}", help="Solapamiento de bigramas")
+        col3.metric("ROUGE-L F", f"{m.get('rougeL_f', 0):.4f}", help="Subsecuencia común más larga")
+        col4.metric("BLEU", f"{m.get('bleu_score', 0):.4f}", help="Precisión n-grama ponderada")
+
+        col5, col6, col7 = st.columns(3)
+        col5.metric("Similitud Coseno", f"{m.get('similitud_coseno', 0):.4f}", help="Coherencia temática TF-IDF entre versiones")
+        kappa_val = m.get("kappa")
+        col6.metric("Kappa", f"{kappa_val:.4f}" if kappa_val is not None else "N/A", help="Acuerdo entre agentes en el debate")
+        col7.metric("Gain Score", f"{m.get('gain_score', 0):.4f}", help="Mejora normalizada del puntaje (0–1)")
+
+    except Exception:
+        st.caption("Métricas NLP no disponibles para esta sesión.")
 
 
 def _render_botones_finales() -> None:

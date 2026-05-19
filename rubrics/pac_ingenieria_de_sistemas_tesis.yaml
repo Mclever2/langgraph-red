@@ -1,0 +1,68 @@
+universidad: "Programa de Asistencia a la Culminación de Tesis (PAC)"
+programa: "Ingeniería de Sistemas"
+modalidad: "tesis"
+escala_minima: 0
+escala_maxima: 3
+
+instrucciones_auditor: |
+  Eres un auditor riguroso del Programa PAC de Ingeniería de Sistemas.
+  Aplica la rúbrica PAC con criterios más estrictos que la rúbrica estándar.
+  Nivel 3 solo se otorga cuando el criterio se cumple sin ambigüedad ni lagunas.
+  Nivel 2 requiere cumplimiento sustancial con deficiencias mínimas y localizadas.
+  Nivel 1 indica presencia del elemento pero con errores o inconsistencias notables.
+  Nivel 0 indica ausencia, incoherencia grave o incumplimiento total del criterio.
+  Responde SOLO con JSON: {"score": float, "errores": [lista], "feedback": string}
+
+instrucciones_metodologo: |
+  Eres un metodólogo científico del programa PAC, especializado en investigación
+  aplicada en ingeniería de sistemas con estándares de publicación internacional.
+  Evalúa: (1) coherencia interna entre pregunta, hipótesis, variables y diseño;
+  (2) validez del instrumento de medición; (3) adecuación del análisis estadístico
+  al tipo de variable; (4) replicabilidad del procedimiento descrito.
+  Señala explícitamente si la sección podría superar revisión de pares ciegos.
+
+criterios:
+  - nombre: "Planteamiento del problema"
+    descripcion: "Delimitación precisa del problema con evidencia empírica y gap teórico justificado"
+    peso: 0.20
+    niveles:
+      0: "Ausencia de planteamiento o descripción genérica sin delimitación. No identifica gap de conocimiento ni sustenta la relevancia del problema."
+      1: "Planteamiento presente pero impreciso: el problema se menciona sin cuantificación ni referencia a evidencia empírica. El gap teórico no se articula o es tautológico."
+      2: "Problema delimitado con datos de contexto y referencia a literatura relevante. El gap se identifica aunque no se argumenta con suficiente profundidad respecto al estado del arte."
+      3: "Problema delimitado con precisión, sustentado en datos empíricos actualizados (≤5 años) y enmarcado en un gap teórico claramente identificado y diferenciado de trabajos previos. La relevancia práctica y científica es explícita e inequívoca."
+
+  - nombre: "Hipótesis"
+    descripcion: "Formulación verificable con relación causal explícita entre variables independiente y dependiente"
+    peso: 0.20
+    niveles:
+      0: "Sin hipótesis, o hipótesis formulada como pregunta o afirmación tautológica. No existe relación entre variables."
+      1: "Hipótesis presente pero no verificable empíricamente: falta operacionalización de al menos una variable, o la relación propuesta no puede falsarse con los datos disponibles."
+      2: "Hipótesis verificable con relación causal identificada. La operacionalización es parcial o contiene ambigüedades menores en la dirección del efecto esperado."
+      3: "Hipótesis formulada con rigor: expresa relación direccional entre VI y VD operacionalizadas, especifica la población objetivo, es falsable con el diseño propuesto y es consistente con el marco teórico."
+
+  - nombre: "Marco metodológico"
+    descripcion: "Alineación entre enfoque, tipo, diseño, población, muestra y técnicas de análisis"
+    peso: 0.20
+    niveles:
+      0: "Metodología ausente, incoherente o importada sin justificación. El diseño no permite responder la pregunta de investigación."
+      1: "Metodología declarada pero sin justificación de la elección. Hay al menos una inconsistencia mayor entre el tipo de investigación y el diseño, o entre el diseño y las técnicas de análisis previstas."
+      2: "Metodología coherente en sus componentes principales con justificación parcial. Las inconsistencias son menores y no afectan la validez interna del estudio, aunque podrían limitar la generalización."
+      3: "Metodología completamente alineada: enfoque, tipo, diseño, técnicas de recolección y análisis se articulan de forma explícita y justificada. El diseño garantiza validez interna y externa, y permite replicación."
+
+  - nombre: "Variables y operacionalización"
+    descripcion: "Definición conceptual y operacional con dimensiones, indicadores y escalas de medición especificadas"
+    peso: 0.20
+    niveles:
+      0: "Variables no definidas, confundidas con el objeto de estudio o sin distinción entre VI y VD. No existe operacionalización."
+      1: "Variables identificadas con definición conceptual básica, pero la operacionalización es incompleta: faltan dimensiones, indicadores o escala de medición en al menos una variable clave."
+      2: "Operacionalización presente con dimensiones e indicadores definidos. La escala de medición se especifica pero puede haber inconsistencias entre el nivel de medición y las técnicas de análisis previstas."
+      3: "Operacionalización exhaustiva: cada variable tiene definición conceptual y operacional, dimensiones, indicadores con criterios de medición, escala (nominal/ordinal/intervalo/razón) y fuente de datos. Es consistente con la hipótesis, el diseño y el análisis estadístico planificado."
+
+  - nombre: "Redacción y coherencia académica"
+    descripcion: "Precisión terminológica, cohesión argumentativa, citación normada y ausencia de ambigüedades"
+    peso: 0.20
+    niveles:
+      0: "Redacción con errores graves que impiden la comprensión. Ausencia de cohesión entre párrafos o secciones. No sigue ninguna norma de citación."
+      1: "Redacción comprensible pero con múltiples problemas: uso impreciso de términos técnicos, transiciones débiles entre ideas, citas incompletas o inconsistentes con la norma declarada."
+      2: "Redacción de nivel académico aceptable. La argumentación es coherente en su estructura general, aunque se detectan ambigüedades puntuales en la terminología o saltos lógicos menores que no comprometen la comprensión global."
+      3: "Redacción precisa y cohesionada: terminología técnica usada con consistencia, cada afirmación sustantiva está respaldada con evidencia o argumento explícito, las citas siguen la norma declarada sin excepciones y la transición entre ideas construye un argumento continuo sin lagunas lógicas."

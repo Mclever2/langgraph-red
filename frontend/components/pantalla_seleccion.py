@@ -127,6 +127,11 @@ def render_pantalla_seleccion() -> None:
 
     # ── Estado inicial para el grafo ──────────────────────────────────────────
     estado_inicial = {
+        "run_id":                      st.session_state.thread_id,
+        "universidad":                 st.session_state.get("universidad", "upao"),
+        "programa":                    st.session_state.get("programa", "ingeniería de sistemas"),
+        "modalidad":                   st.session_state.get("modalidad", "tesis"),
+        "puntaje_inicial":             0.0,
         "seccion_objetivo":            seccion_elegida,
         "contexto_recuperado":         contexto_tesis,
         "contexto_dependencias":       contexto_dependencias,
@@ -153,9 +158,13 @@ def render_pantalla_seleccion() -> None:
         "resultado_disenso":           "",
         "ronda_debate":                0,
         "historial_debate":            [],
-        "argumento_redactor":          "",
-        "veredicto_debate":            "",
-        "aprobacion_humana":           None,
+        "argumento_debate_auditor":    "",
+        "debate_auditor_ronda":        0,
+        "debate_metodologo_ronda":     0,
+        "_puntaje_max":                None,
+        "consenso_matematico":         {},
+        "scores_subagentes":           [],
+        "consenso_matematico_auditor": {},
     }
 
     config = get_config()
@@ -170,13 +179,7 @@ def render_pantalla_seleccion() -> None:
             st.session_state.error_msg = f"Error en el grafo: {exc}"
             st.rerun()
 
-        snap = get_snapshot()
-        if is_paused(snap):
-            st.write("Listo para revisión del mentor")
-            st.session_state.graph_status = "paused"
-            status_run.update(label="Evaluación completada — pendiente revisión", state="complete")
-        else:
-            st.session_state.graph_status = "completed"
-            status_run.update(label="Completado", state="complete")
+        st.session_state.graph_status = "completed"
+        status_run.update(label="Evaluación completada — resultado listo", state="complete")
 
     st.rerun()

@@ -1,0 +1,62 @@
+universidad: "Universidad Privada Antenor Orrego"
+programa: "Ingeniería de Sistemas"
+modalidad: "tesis"
+escala_minima: 0
+escala_maxima: 3
+
+instrucciones_auditor: |
+  Eres un auditor estricto de proyectos de tesis de ingeniería de sistemas.
+  Evalúa cada criterio con la escala 0-3 según los niveles definidos.
+  Sé objetivo y no complaciente. Prioriza precisión sobre cortesía.
+  Responde SOLO con JSON: {"score": float, "errores": [lista], "feedback": string}
+
+instrucciones_metodologo: |
+  Eres un metodólogo científico especializado en investigación en ingeniería de sistemas.
+  Verifica coherencia entre hipótesis, variables y operacionalización.
+  Detecta problemas de rigor metodológico que la rúbrica formal no captura.
+
+criterios:
+  - nombre: "Planteamiento del problema"
+    descripcion: "Claridad y justificación del problema de investigación"
+    peso: 0.20
+    niveles:
+      0: "No existe planteamiento o es incoherente"
+      1: "Planteamiento vago, sin justificación clara"
+      2: "Planteamiento presente pero con deficiencias menores"
+      3: "Planteamiento claro, justificado y delimitado correctamente"
+
+  - nombre: "Hipótesis"
+    descripcion: "Formulación correcta de hipótesis de investigación"
+    peso: 0.20
+    niveles:
+      0: "Sin hipótesis o hipótesis inválida"
+      1: "Hipótesis presente pero no verificable"
+      2: "Hipótesis verificable con observaciones menores"
+      3: "Hipótesis bien formulada, verificable y coherente con el problema"
+
+  - nombre: "Marco metodológico"
+    descripcion: "Coherencia entre tipo, método, diseño y objetivos"
+    peso: 0.20
+    niveles:
+      0: "Sin metodología o metodología incoherente"
+      1: "Metodología presente pero no justificada"
+      2: "Metodología adecuada con deficiencias menores"
+      3: "Metodología rigurosa, coherente y bien justificada"
+
+  - nombre: "Variables y operacionalización"
+    descripcion: "Definición operacional clara con dimensiones e indicadores"
+    peso: 0.20
+    niveles:
+      0: "Sin variables definidas o definición incorrecta"
+      1: "Variables presentes pero sin operacionalización"
+      2: "Operacionalización presente con deficiencias"
+      3: "Operacionalización completa, consistente con hipótesis y diseño"
+
+  - nombre: "Redacción y coherencia"
+    descripcion: "Claridad, cohesión y coherencia académica del texto"
+    peso: 0.20
+    niveles:
+      0: "Redacción deficiente, incoherente o con errores graves"
+      1: "Redacción básica con múltiples problemas de coherencia"
+      2: "Redacción aceptable con problemas menores"
+      3: "Redacción clara, cohesionada y de nivel académico"

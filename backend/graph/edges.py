@@ -13,10 +13,11 @@ DESTINOS_VALIDOS = {
     "redactor",
     "auditor",
     "metodologico",
-    "debate",
+    "debate_auditor",    # Auditor argumenta → escribe al estado
+    "debate_metodologo", # Metodólogo lee del estado → emite veredicto
     "consenso",
     "disenso",
-    "humano",
+    "fin",
 }
 
 
@@ -25,9 +26,9 @@ def routing_supervisor(state: MentoriaState) -> str:
     Lee la decisión del Supervisor y devuelve el nombre del siguiente nodo.
 
     Si por algún motivo el valor no es válido (fallo del LLM),
-    cae a 'humano' como destino seguro.
+    cae a 'fin' como destino seguro para no quedarse en bucle.
     """
-    destino = state.get("siguiente_nodo", "humano")
+    destino = state.get("siguiente_nodo", "fin")
     if destino not in DESTINOS_VALIDOS:
-        return "humano"
+        return "fin"
     return destino

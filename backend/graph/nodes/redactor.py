@@ -1,8 +1,9 @@
 """
-Agente Redactor — Produce el texto mejorado y argumenta sus decisiones.
+Agente Redactor — Produce el texto mejorado aplicando las correcciones confirmadas.
 
-Recibe el plan del Supervisor, el contexto RAG cruzado (sección + dependientes)
-y los resultados del debate previo para generar una versión fundamentada.
+Recibe el plan del Supervisor, el feedback del Auditor, las observaciones del
+Metodólogo y el historial del debate (errores confirmados) para generar la versión
+corregida del texto. El Redactor no participa en el debate.
 """
 
 import logging
@@ -44,7 +45,7 @@ def make_nodo_redactor(llm: ChatGroq):
             "plan_supervisor":          state.get("plan_supervisor") or "Sin plan previo.",
             "feedback_auditor":         state.get("feedback_auditor") or "Primera iteración.",
             "observaciones_metodologicas": state.get("observaciones_metodologicas") or "",
-            "veredicto_debate":         state.get("veredicto_debate") or "",
+            "historial_debate":          str(state.get("historial_debate") or []),
         })
 
         return {

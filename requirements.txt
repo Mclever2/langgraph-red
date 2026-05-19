@@ -10,9 +10,25 @@ langchain-text-splitters>=0.3.0     # RecursiveCharacterTextSplitter
 chromadb>=0.5.0                     # Base de datos vectorial en memoria
 sentence-transformers>=3.2.0        # multilingual-e5-small (~117 MB, se descarga una vez)
 pdfplumber>=0.11.0                  # Extracción robusta de texto de PDFs
-rouge-score>=0.1.2                  # ROUGE-L para métricas de coherencia (Lin, 2004)
 
-# ── Interfaz ──────────────────────────────────────────────────────────────────
+# ── Métricas NLP (evaluator/) ─────────────────────────────────────────────────
+rouge-score>=0.1.2                  # ROUGE-1, ROUGE-2, ROUGE-L
+sacrebleu>=2.3.1                    # BLEU score
+scikit-learn>=1.3.0                 # TF-IDF, cosine_similarity, Cohen's Kappa
+numpy>=1.24.0                       # consenso matemático
+
+# ── Context / Rúbricas ───────────────────────────────────────────────────────
+pyyaml>=6.0                         # Parseo de rúbricas YAML
+
+# ── Cloud / Storage ───────────────────────────────────────────────────────────
+google-cloud-storage>=2.14.0        # Subida a GCS (opcional, solo si GCS_BUCKET_NAME)
+requests>=2.31.0                    # Google Drive loader
+
+# ── API FastAPI (Cloud Run) ───────────────────────────────────────────────────
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+
+# ── Interfaz Streamlit ───────────────────────────────────────────────────────
 streamlit>=1.38.0
 
 # ── Utilidades ────────────────────────────────────────────────────────────────

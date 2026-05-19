@@ -35,8 +35,9 @@ class DecisionSupervisor(BaseModel):
     """Decisión de routing del Supervisor."""
     siguiente: Literal[
         "redactor", "auditor", "metodologico",
-        "debate", "consenso", "disenso", "humano"
-    ] = Field(description="Nombre del agente a ejecutar a continuación")
+        "debate_auditor", "debate_metodologo",
+        "consenso", "disenso", "fin"
+    ] = Field(description="Nombre del agente a ejecutar a continuación, o 'fin' para terminar")
     razon: str = Field(
         description="Explicación técnica breve de por qué se eligió este agente (máx. 2 oraciones)"
     )
@@ -72,12 +73,14 @@ def make_nodo_supervisor(llm: ChatGroq):
         max_iter   = state.get("max_iteraciones", 3)
         n_errores  = len(state.get("errores_rubrica", []))
 
-        iter_auditada     = state.get("iter_auditada", 0)
-        iter_metodologica = state.get("iter_metodologica", 0)
-        iter_consenso     = state.get("iter_consenso", 0)
-        iter_disenso      = state.get("iter_disenso", 0)
-        ronda_debate      = state.get("ronda_debate", 0)
-        max_rondas        = state.get("max_rondas_debate", 2)
+        iter_auditada          = state.get("iter_auditada", 0)
+        iter_metodologica      = state.get("iter_metodologica", 0)
+        iter_consenso          = state.get("iter_consenso", 0)
+        iter_disenso           = state.get("iter_disenso", 0)
+        ronda_debate           = state.get("ronda_debate", 0)
+        max_rondas             = state.get("max_rondas_debate", 2)
+        debate_auditor_ronda   = state.get("debate_auditor_ronda", 0)
+        debate_metodologo_ronda = state.get("debate_metodologo_ronda", 0)
 
         # iter_xxx = n_iter+1 tras cada ejecución → "corrió en este ciclo" = iter > n_iter
         auditor_ok      = iter_auditada > n_iter
@@ -94,13 +97,13 @@ def make_nodo_supervisor(llm: ChatGroq):
 
         # ── Protección anti-bucle (capa semántica) ────────────────────────────
         if pasos >= max_pasos:
-            logger.warning(f"[Supervisor] Límite de pasos ({pasos}/{max_pasos}) → humano")
+            logger.warning(f"[Supervisor] Límite de pasos ({pasos}/{max_pasos}) → fin")
             resumen = (
                 f"Límite de pasos alcanzado ({pasos}). "
                 f"Iteraciones: {n_iter}/{max_iter}. Errores pendientes: {n_errores}."
             )
             return {
-                "siguiente_nodo":           "humano",
+                "siguiente_nodo":           "fin",
                 "instrucciones_supervisor": resumen,
                 "plan_supervisor":          resumen,
                 "pasos_ejecutados":         pasos + 1,
@@ -156,21 +159,35 @@ def make_nodo_supervisor(llm: ChatGroq):
                 "Señala ítems donde sus evaluaciones son opuestas y recomienda cómo resolverlos."
             )
 
+        elif debate_auditor_ronda > debate_metodologo_ronda:
+            # Fase 5b — DEBATE: Auditor ya argumentó, Metodólogo aún no respondió
+            # El Metodólogo lee el argumento directamente del estado compartido.
+            force       = "debate_metodologo"
+            force_razon = (
+                f"Debate ronda {debate_auditor_ronda}: "
+                "Metodólogo evalúa argumento del Auditor (lee desde estado)"
+            )
+            force_inst  = (
+                "Lee argumento_debate_auditor del estado. "
+                "Emite veredicto estructurado ítem por ítem: confirmado o descartado. "
+                "Actualiza errores_rubrica eliminando los descartados."
+            )
+
         elif n_errores > 0 and ronda_debate < max_rondas:
-            # Fase 5 — DEBATE obligatorio: todos evaluaron, hay errores, quedan rondas
+            # Fase 5a — DEBATE: hay errores, hay rondas, Auditor inicia la siguiente ronda
             items_str = ", ".join(
                 f"ítem {e['item_numero']}"
                 for e in state.get("errores_rubrica", [])[:6]
             )
-            force       = "debate"
+            force       = "debate_auditor"
             force_razon = (
                 f"DEBATE OBLIGATORIO: {n_errores} errores · "
-                f"Ronda {ronda_debate + 1}/{max_rondas}"
+                f"Ronda {ronda_debate + 1}/{max_rondas} — Auditor argumenta"
             )
             force_inst  = (
-                f"El Redactor argumenta sus decisiones para: {items_str}. "
-                "Los Evaluadores emiten veredicto ítem por ítem. "
-                "Actualiza errores_rubrica: elimina los ítems aceptados."
+                f"Defiende con evidencia concreta los errores pendientes: {items_str}. "
+                "Escribe tu argumento al estado (argumento_debate_auditor). "
+                "El Metodólogo responderá en el siguiente paso."
             )
 
         elif n_iter < max_iter and (
@@ -205,25 +222,31 @@ def make_nodo_supervisor(llm: ChatGroq):
             force = "redactor"
 
         elif n_errores == 0 or n_iter >= max_iter:
-            # Fase 7 — HUMANO: sin errores o ciclos agotados
+            # Fase 7 — FIN: sin errores o ciclos agotados → resultado automático
             if n_errores == 0:
                 force_razon = (
-                    f"Texto aprobado por rúbrica: 0 errores bloqueantes "
-                    f"(puntaje {state.get('puntaje_estimado', 0)} pts)"
+                    f"Texto sin errores bloqueantes "
+                    f"(puntaje {state.get('puntaje_estimado', 0)} pts) — proceso completado"
                 )
-                force_inst = "El texto cumple todos los ítems. Presentar al mentor para revisión final."
+                force_inst = "El texto cumple todos los ítems de la rúbrica. Resultado final generado."
             else:
-                force_razon = f"Ciclos agotados ({n_iter}/{max_iter}) — {n_errores} observaciones pendientes"
+                force_razon = f"Ciclos agotados ({n_iter}/{max_iter}) — resultado final con {n_errores} observaciones"
                 force_inst  = (
-                    f"Se completaron {n_iter} ciclos. "
-                    f"Quedan {n_errores} observaciones para que el mentor decida."
+                    f"Se completaron {n_iter} ciclo(s) de mejora. "
+                    f"Resultado entregado con {n_errores} observación(es) pendiente(s)."
                 )
-            force = "humano"
+            force = "fin"
 
         # ── Si hay una decisión determinista, devolverla sin llamar al LLM ─────
         if force is not None:
             logger.info(f"[Supervisor] Fase determinista → {force.upper()} | {force_razon}")
-            extra = {"ronda_debate": 0} if force == "redactor" else {}
+            # Al enrutar al Redactor se cierra el ciclo: resetear todos los contadores de debate
+            extra = {
+                "ronda_debate": 0,
+                "debate_auditor_ronda": 0,
+                "debate_metodologo_ronda": 0,
+                "argumento_debate_auditor": "",
+            } if force == "redactor" else {}
             return {
                 "siguiente_nodo":           force,
                 "instrucciones_supervisor": force_inst,
@@ -257,7 +280,7 @@ def make_nodo_supervisor(llm: ChatGroq):
             "observaciones_metodologicas": state.get("observaciones_metodologicas") or "Aún no disponible.",
             "resultado_consenso":        state.get("resultado_consenso") or "Sin análisis de consenso aún.",
             "resultado_disenso":         state.get("resultado_disenso") or "Sin análisis de disenso aún.",
-            "veredicto_debate":          state.get("veredicto_debate") or "Sin debate aún.",
+            "historial_debate":          str(state.get("historial_debate") or []),
             "plan_anterior":             state.get("plan_supervisor") or "Primera decisión del ciclo.",
         })
 
@@ -265,11 +288,17 @@ def make_nodo_supervisor(llm: ChatGroq):
             f"[Supervisor] LLM decidió: {decision.siguiente.upper()} | {decision.razon[:80]}…"
         )
 
-        extra = {"ronda_debate": 0} if decision.siguiente == "redactor" else {}
+        siguiente = decision.siguiente
+        extra = {
+            "ronda_debate": 0,
+            "debate_auditor_ronda": 0,
+            "debate_metodologo_ronda": 0,
+            "argumento_debate_auditor": "",
+        } if siguiente == "redactor" else {}
         return {
-            "siguiente_nodo":           decision.siguiente,
+            "siguiente_nodo":           siguiente,
             "instrucciones_supervisor": decision.instrucciones,
-            "plan_supervisor":          f"[{decision.siguiente.upper()}] {decision.instrucciones}",
+            "plan_supervisor":          f"[{siguiente.upper()}] {decision.instrucciones}",
             "pasos_ejecutados":         pasos + 1,
             **extra,
         }

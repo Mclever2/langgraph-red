@@ -4,6 +4,7 @@ import os
 import time
 import random
 import logging
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -46,3 +47,32 @@ def invocar_con_backoff(chain, inputs: dict, max_reintentos: int = 3):
             else:
                 raise
     raise RuntimeError("Se agotaron los reintentos por rate-limit de Groq.")
+
+
+def calcular_consenso_matematico(scores: list, umbral_std: float = 0.5) -> dict:
+    """
+    Determina consenso matemáticamente a partir de una lista de scores numéricos.
+    NO usa LLM. std_dev <= umbral → consenso; caso contrario → debate necesario.
+    """
+    if not scores:
+        return {"hay_consenso": False, "motivo": "sin scores"}
+
+    arr = np.array(scores, dtype=float)
+    media = float(np.mean(arr))
+    std_dev = float(np.std(arr))
+    moda_score = float(max(set(scores), key=scores.count))
+
+    hay_consenso = std_dev <= umbral_std
+
+    return {
+        "hay_consenso": hay_consenso,
+        "score_consenso": round(moda_score if hay_consenso else media, 3),
+        "media": round(media, 3),
+        "std_dev": round(std_dev, 3),
+        "activar_debate": not hay_consenso,
+        "motivo": (
+            f"std_dev={std_dev:.2f} <= {umbral_std} → consenso"
+            if hay_consenso
+            else f"std_dev={std_dev:.2f} > {umbral_std} → debate necesario"
+        ),
+    }

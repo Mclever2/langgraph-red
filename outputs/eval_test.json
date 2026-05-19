@@ -1,0 +1,18 @@
+{
+  "run_id": "test",
+  "arquitectura": "langgraph-hub-spoke",
+  "universidad": "upao",
+  "metricas": {
+    "rouge1_f": 0.7692,
+    "rouge2_f": 0.6667,
+    "rougeL_f": 0.7692,
+    "bleu_score": 0.4385,
+    "similitud_coseno": 0.7524,
+    "interpretacion": "mejora alta",
+    "kappa": 0.0,
+    "nota": "acuerdo/desacuerdo uniforme en todo el debate",
+    "gain_score": 0.75,
+    "puntaje_inicial": 1.0,
+    "puntaje_final": 2.5
+  }
+}

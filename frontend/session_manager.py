@@ -25,6 +25,9 @@ _DEFAULTS: dict = {
     "error_msg":             None,
     "libro_subido_feedback": None,
     "estructura_toc":        None,   # dict {nombre_seccion: n_pagina} detectado del índice
+    "universidad":           "upao",
+    "programa":              "ingeniería de sistemas",
+    "modalidad":             "tesis",
 }
 
 
@@ -47,6 +50,9 @@ def reset_todo() -> None:
     st.session_state.rubrica_nombre  = None
     st.session_state.error_msg       = None
     st.session_state.estructura_toc  = None
+    st.session_state.universidad     = "upao"
+    st.session_state.programa        = "ingeniería de sistemas"
+    st.session_state.modalidad       = "tesis"
 
 
 def reset_solo_grafo() -> None:
@@ -69,8 +75,8 @@ def get_snapshot():
 
 
 def is_paused(snapshot) -> bool:
-    """True si el grafo está pausado esperando la revisión del mentor."""
-    return bool(snapshot.next) and "nodo_humano" in snapshot.next
+    """El grafo ya no tiene HITL — siempre corre hasta completarse."""
+    return False
 
 
 # ── Helpers de presentación ───────────────────────────────────────────────────

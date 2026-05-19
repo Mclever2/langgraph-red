@@ -1,18 +1,16 @@
 """
-Pantalla 3 — Revisión humana (grafo pausado en HITL).
+Pantalla 3 — Resultados del ciclo automático.
 
-Muestra métricas del ciclo automático, el informe del Auditor agrupado
-por sección de la rúbrica activa, el debate y el texto mejorado.
-El mentor puede aprobar (con ediciones) o rechazar y re-evaluar.
+Muestra métricas, informe del Auditor, historial del debate (Auditor vs Metodólogo)
+y el texto mejorado generado por el sistema. El grafo ya completó su ejecución
+de forma autónoma — no hay intervención humana en este punto.
 """
 
 import streamlit as st
 
 from backend.config import SECCION_ITEMS_MAP, puntaje_a_nota
 
-from ..resources import graph
 from ..session_manager import (
-    get_config,
     get_snapshot,
     badge_puntaje,
 )
@@ -42,10 +40,10 @@ def render_pantalla_revision() -> None:
     resultado_consenso = v.get("resultado_consenso", "")
     resultado_disenso  = v.get("resultado_disenso", "")
 
-    st.title("Revisión del Mentor — Aprobación Final")
+    st.title("Resultados de la Evaluación Multiagente")
     st.markdown(
         f"El ciclo automático finalizó tras **{n_iter} iteración(es)**. "
-        "Revisa el texto, edítalo si lo deseas y decide si lo apruebas."
+        "El sistema procesó el texto de forma autónoma."
     )
     st.divider()
 
@@ -58,9 +56,7 @@ def render_pantalla_revision() -> None:
     )
     st.divider()
 
-    texto_editado = _render_editor(v, seccion)
-    st.divider()
-    _render_decision(texto_editado)
+    _render_editor(v, seccion)
 
 
 # ── Secciones internas ────────────────────────────────────────────────────────
@@ -194,31 +190,31 @@ def _render_tab_debate(historial_debate: list, v: dict) -> None:
         st.info("No hubo rondas de debate en este ciclo.")
         return
 
-    st.markdown(f"Se realizaron **{len(historial_debate)} ronda(s) de debate**.")
+    st.markdown(f"Se realizaron **{len(historial_debate)} ronda(s) de debate** (Auditor vs Metodólogo).")
     for ronda in historial_debate:
-        n_ronda    = ronda.get("ronda", "?")
-        items_acep = ronda.get("items_aceptados", [])
-        items_mant = ronda.get("items_mantenidos", [])
+        n_ronda       = ronda.get("ronda", "?")
+        items_conf    = ronda.get("items_confirmados", [])
+        items_desc    = ronda.get("items_descartados", [])
         with st.expander(
             f"Ronda {n_ronda} — "
-            f"{len(items_acep)} aceptados · {len(items_mant)} mantenidos",
+            f"{len(items_conf)} confirmados · {len(items_desc)} descartados",
             expanded=(n_ronda == len(historial_debate)),
         ):
-            st.markdown("**Argumento del Redactor:**")
-            st.info(ronda.get("argumento_redactor", "—"))
-            st.markdown("**Veredicto de los Evaluadores:**")
-            st.warning(ronda.get("veredicto_evaluadores", "—"))
-            col_a, col_m = st.columns(2)
-            with col_a:
-                if items_acep:
-                    st.success(f"Ítems aceptados: {', '.join(str(i) for i in items_acep)}")
+            st.markdown("**Argumento del Auditor** (defiende sus hallazgos de rúbrica):")
+            st.info(ronda.get("argumento_auditor", "—"))
+            st.markdown("**Respuesta del Metodólogo** (evalúa si los errores son reales):")
+            st.warning(ronda.get("respuesta_metodologico", "—"))
+            col_c, col_d = st.columns(2)
+            with col_c:
+                if items_conf:
+                    st.error(f"Ítems confirmados (debe corregir): {', '.join(str(i) for i in items_conf)}")
                 else:
-                    st.info("Sin ítems aceptados")
-            with col_m:
-                if items_mant:
-                    st.error(f"Ítems mantenidos: {', '.join(str(i) for i in items_mant)}")
+                    st.success("Sin ítems confirmados")
+            with col_d:
+                if items_desc:
+                    st.success(f"Ítems descartados (no eran reales): {', '.join(str(i) for i in items_desc)}")
                 else:
-                    st.success("Sin ítems mantenidos")
+                    st.info("Sin ítems descartados")
 
 
 def _render_tab_consenso_disenso(resultado_consenso: str, resultado_disenso: str) -> None:
@@ -242,38 +238,17 @@ def _render_tab_consenso_disenso(resultado_consenso: str, resultado_disenso: str
             st.caption("El nodo de Disenso no fue activado en este ciclo.")
 
 
-def _render_editor(v: dict, seccion: str) -> str:
+def _render_editor(v: dict, seccion: str) -> None:
     st.subheader(f"Texto mejorado — Sección: *{seccion}*")
     st.caption(
-        "El sistema mejoró el texto del estudiante basándose en su contenido original y la rúbrica activa. "
-        "Puedes editarlo antes de aprobar. Los placeholders [COMPLETAR: ...] indican secciones que el estudiante debe completar."
+        "Texto generado por el Redactor basándose en el contenido original del estudiante y la rúbrica activa. "
+        "Los placeholders [COMPLETAR: ...] indican elementos que el estudiante debe completar."
     )
-    return st.text_area(
-        label="Texto para aprobación:",
+    st.text_area(
+        label="Texto resultado:",
         value=v.get("texto_iterado", ""),
         height=450,
-        key="editor_texto_hitl",
+        key="editor_texto_resultado",
         label_visibility="collapsed",
+        disabled=True,
     )
-
-
-def _render_decision(texto_editado: str) -> None:
-    st.subheader("Decisión del Mentor")
-    st.markdown("**Aprobar:** El texto (con tus ediciones) queda como versión final de esta iteración.")
-    if st.button("Aprobar Texto Final", type="primary", use_container_width=True):
-        config = get_config()
-        graph.update_state(
-            config,
-            {
-                "aprobacion_humana": "aprobado",
-                "texto_iterado":     texto_editado,
-            },
-        )
-        with st.spinner("Registrando aprobación y calculando métricas…"):
-            try:
-                graph.invoke(None, config)
-            except Exception as exc:
-                st.session_state.error_msg = f"Error al reanudar el grafo: {exc}"
-                st.rerun()
-        st.session_state.graph_status = "completed"
-        st.rerun()

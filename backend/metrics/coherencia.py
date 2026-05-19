@@ -137,7 +137,7 @@ def _calcular_metricas(state: dict) -> dict:
             "puntaje_max":      puntaje_max,
             "errores_finales":  len(errores_ini),
             "items_debatidos":  sum(
-                len(r.get("items_aceptados", [])) + len(r.get("items_mantenidos", []))
+                len(r.get("items_confirmados", [])) + len(r.get("items_descartados", []))
                 for r in historial
             ),
         },
@@ -186,10 +186,10 @@ def _tasa_acuerdo(historial: list, errores_finales: list) -> float:
 
     decisiones_por_item: dict[int, set] = {}
     for ronda in historial:
-        for item in ronda.get("items_aceptados", []):
-            decisiones_por_item.setdefault(item, set()).add("aceptado")
-        for item in ronda.get("items_mantenidos", []):
-            decisiones_por_item.setdefault(item, set()).add("mantenido")
+        for item in ronda.get("items_confirmados", []):
+            decisiones_por_item.setdefault(item, set()).add("confirmado")
+        for item in ronda.get("items_descartados", []):
+            decisiones_por_item.setdefault(item, set()).add("descartado")
 
     if not decisiones_por_item:
         return 1.0
@@ -215,7 +215,7 @@ def _rouge_l_debate(historial: list, feedback_auditor: str) -> float:
 
         scores = []
         for ronda in historial:
-            argumento = ronda.get("argumento_redactor", "")
+            argumento = ronda.get("argumento_auditor", "")
             if argumento.strip():
                 result = scorer.score(feedback_auditor, argumento)
                 scores.append(result["rougeL"].fmeasure)
@@ -224,7 +224,7 @@ def _rouge_l_debate(historial: list, feedback_auditor: str) -> float:
 
     except ImportError:
         # rouge_score no instalado — usar superposición de bigramas como fallback
-        return _bigram_overlap(feedback_auditor, historial[-1].get("argumento_redactor", ""))
+        return _bigram_overlap(feedback_auditor, historial[-1].get("argumento_auditor", ""))
     except Exception as exc:
         logger.warning(f"[Coherencia] Error en ROUGE-L: {exc}")
         return 0.5
@@ -309,16 +309,13 @@ def generar_transcripcion_debate(state: dict) -> str:
     obs_metod      = state.get("observaciones_metodologicas", "—")
     consenso       = state.get("resultado_consenso", "")
     disenso        = state.get("resultado_disenso", "")
-    aprobacion     = state.get("aprobacion_humana", "aprobado")
-
     lineas = [
-        f"# Transcripción del Debate Multiagente",
+        f"# Transcripción del Debate Multiagente (Auditor vs Metodólogo)",
         f"",
         f"**Sección evaluada:** {seccion}  ",
         f"**Fecha:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  ",
         f"**Iteraciones del ciclo:** {n_iter}  ",
         f"**Rondas de debate:** {len(historial)}  ",
-        f"**Decisión final del mentor:** {aprobacion.upper()}  ",
         f"",
         f"---",
         f"",
@@ -401,24 +398,24 @@ def generar_transcripcion_debate(state: dict) -> str:
     else:
         for ronda in historial:
             n = ronda.get("ronda", "?")
-            aceptados  = ronda.get("items_aceptados", [])
-            mantenidos = ronda.get("items_mantenidos", [])
+            confirmados = ronda.get("items_confirmados", [])
+            descartados = ronda.get("items_descartados", [])
             lineas += [
                 f"### Ronda {n}",
                 f"",
-                f"#### Argumento del Redactor",
+                f"#### Argumento del Auditor (defiende hallazgos de rúbrica)",
                 f"",
-                ronda.get("argumento_redactor", "—"),
+                ronda.get("argumento_auditor", "—"),
                 f"",
-                f"#### Veredicto de los Evaluadores",
+                f"#### Respuesta del Metodólogo (evalúa si los errores son reales)",
                 f"",
-                ronda.get("veredicto_evaluadores", "—"),
+                ronda.get("respuesta_metodologico", "—"),
                 f"",
-                f"**Ítems aceptados (error resuelto):** "
-                + (", ".join(str(i) for i in aceptados) if aceptados else "ninguno"),
+                f"**Ítems confirmados (error real — Redactor debe corregir):** "
+                + (", ".join(str(i) for i in confirmados) if confirmados else "ninguno"),
                 f"  ",
-                f"**Ítems mantenidos (error persiste):** "
-                + (", ".join(str(i) for i in mantenidos) if mantenidos else "ninguno"),
+                f"**Ítems descartados (no son errores reales):** "
+                + (", ".join(str(i) for i in descartados) if descartados else "ninguno"),
                 f"",
                 f"---",
                 f"",

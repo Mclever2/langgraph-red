@@ -2,21 +2,28 @@
 Grafo multiagente de mentoría académica — ARQUITECTURA DE RED PURA.
 
 Topología:
-  START → nodo_supervisor ←──────────────────────────────────────────────────┐
-               │  (conditional edge: lee state["siguiente_nodo"])            │
-               ├──────────────→ nodo_redactor ──────────────────────────────┤
-               ├──────────────→ nodo_auditor ───────────────────────────────┤
-               ├──────────────→ nodo_metodologico ──────────────────────────┤
-               ├──────────────→ nodo_debate ────────────────────────────────┤
-               ├──────────────→ nodo_consenso ──────────────────────────────┤
-               ├──────────────→ nodo_disenso ───────────────────────────────┘
-               └──────────────→ nodo_humano → END  (HITL — interrupt_before)
+  START → nodo_supervisor ←─────────────────────────────────────────────────────┐
+               │  (conditional edge: lee state["siguiente_nodo"])               │
+               ├──────────────→ nodo_redactor ────────────────────────────────┤ │
+               ├──────────────→ nodo_auditor ─────────────────────────────────┤ │
+               ├──────────────→ nodo_metodologico ───────────────────────────┤ │
+               ├──────────────→ nodo_debate_auditor ──────────────────────────┤ │
+               │                  (escribe argumento al estado)               │ │
+               ├──────────────→ nodo_debate_metodologo ─────────────────────┤ │
+               │                  (lee argumento del estado, emite veredicto) │ │
+               ├──────────────→ nodo_consenso ────────────────────────────────┤ │
+               ├──────────────→ nodo_disenso ─────────────────────────────────┘ │
+               └──────────────→ END  (cuando siguiente_nodo == "fin")            │
+  Todos los nodos regresan al Supervisor via edge fijo ──────────────────────────┘
 
-El Supervisor LLM lee el estado completo en cada turno y decide dinámicamente
-qué agente ejecutar. No hay edges hardcodeados entre agentes.
+Debate inter-agente real:
+  Supervisor → debate_auditor (escribe al estado) → Supervisor
+  Supervisor → debate_metodologo (lee del estado) → Supervisor
+  Los agentes se comunican exclusivamente a través de MentoriaState,
+  no por parámetros de función. Cada uno es un nodo independiente del grafo.
 
 Protección anti-bucle:
-  1. Semántica:  pasos_ejecutados >= max_pasos_red → Supervisor fuerza "humano"
+  1. Semántica:  pasos_ejecutados >= max_pasos_red → Supervisor fuerza "fin"
   2. Sistémica:  recursion_limit = 80 supersteps (capa de seguridad de LangGraph)
 """
 
@@ -32,16 +39,16 @@ from .nodes import (
     make_nodo_redactor,
     make_nodo_auditor,
     make_nodo_metodologico,
-    make_nodo_debate,
+    make_nodo_debate_auditor,
+    make_nodo_debate_metodologo,
     make_nodo_consenso,
     make_nodo_disenso,
-    nodo_humano,
+    make_nodo_exportador,
 )
 from .edges import routing_supervisor
 
 load_dotenv()
 
-# Con 7 agentes activos + consenso/disenso opcionales, el límite sube a 80
 RECURSION_LIMIT = 80
 
 
@@ -75,16 +82,19 @@ def create_graph():
     builder = StateGraph(MentoriaState)
 
     # ── Registrar todos los nodos ──────────────────────────────────────────────
-    builder.add_node("nodo_supervisor",   make_nodo_supervisor(llm_supervisor))
-    builder.add_node("nodo_redactor",     make_nodo_redactor(llm_redactor))
-    builder.add_node("nodo_auditor",      make_nodo_auditor(llm_auditor))
-    builder.add_node("nodo_metodologico", make_nodo_metodologico(llm_metodologico))
-    builder.add_node("nodo_debate",       make_nodo_debate(llm_redactor, llm_auditor))
-    builder.add_node("nodo_consenso",     make_nodo_consenso(llm_consenso))
-    builder.add_node("nodo_disenso",      make_nodo_disenso(llm_disenso))
-    builder.add_node("nodo_humano",       nodo_humano)
+    builder.add_node("nodo_supervisor",        make_nodo_supervisor(llm_supervisor))
+    builder.add_node("nodo_redactor",          make_nodo_redactor(llm_redactor))
+    builder.add_node("nodo_auditor",           make_nodo_auditor(llm_auditor))
+    builder.add_node("nodo_metodologico",      make_nodo_metodologico(llm_metodologico))
+    # Debate inter-agente real: dos nodos separados que se comunican por estado
+    builder.add_node("nodo_debate_auditor",    make_nodo_debate_auditor(llm_auditor))
+    builder.add_node("nodo_debate_metodologo", make_nodo_debate_metodologo(llm_metodologico))
+    builder.add_node("nodo_consenso",          make_nodo_consenso(llm_consenso))
+    builder.add_node("nodo_disenso",           make_nodo_disenso(llm_disenso))
+    # Exportador: serializa el estado final antes de END (no usa LLM)
+    builder.add_node("nodo_exportador",        make_nodo_exportador())
 
-    # ── Entry point: siempre empieza en el Supervisor ─────────────────────────
+    # ── Entry point ───────────────────────────────────────────────────────────
     builder.set_entry_point("nodo_supervisor")
 
     # ── Supervisor decide dinámicamente (RED PURA) ─────────────────────────────
@@ -92,32 +102,29 @@ def create_graph():
         "nodo_supervisor",
         routing_supervisor,
         {
-            "redactor":     "nodo_redactor",
-            "auditor":      "nodo_auditor",
-            "metodologico": "nodo_metodologico",
-            "debate":       "nodo_debate",
-            "consenso":     "nodo_consenso",
-            "disenso":      "nodo_disenso",
-            "humano":       "nodo_humano",
+            "redactor":          "nodo_redactor",
+            "auditor":           "nodo_auditor",
+            "metodologico":      "nodo_metodologico",
+            "debate_auditor":    "nodo_debate_auditor",    # Turno 1: Auditor escribe al estado
+            "debate_metodologo": "nodo_debate_metodologo", # Turno 2: Metodólogo lee del estado
+            "consenso":          "nodo_consenso",
+            "disenso":           "nodo_disenso",
+            "fin":               "nodo_exportador",
         },
     )
 
-    # ── Todos los agentes regresan al Supervisor (red de vuelta) ──────────────
-    builder.add_edge("nodo_redactor",     "nodo_supervisor")
-    builder.add_edge("nodo_auditor",      "nodo_supervisor")
-    builder.add_edge("nodo_metodologico", "nodo_supervisor")
-    builder.add_edge("nodo_debate",       "nodo_supervisor")
-    builder.add_edge("nodo_consenso",     "nodo_supervisor")
-    builder.add_edge("nodo_disenso",      "nodo_supervisor")
-
-    # ── HITL: humano → END ────────────────────────────────────────────────────
-    builder.add_edge("nodo_humano", END)
+    # ── Todos los agentes regresan al Supervisor ──────────────────────────────
+    builder.add_edge("nodo_redactor",          "nodo_supervisor")
+    builder.add_edge("nodo_auditor",           "nodo_supervisor")
+    builder.add_edge("nodo_metodologico",      "nodo_supervisor")
+    builder.add_edge("nodo_debate_auditor",    "nodo_supervisor")
+    builder.add_edge("nodo_debate_metodologo", "nodo_supervisor")
+    builder.add_edge("nodo_consenso",          "nodo_supervisor")
+    builder.add_edge("nodo_disenso",           "nodo_supervisor")
+    builder.add_edge("nodo_exportador",        END)
 
     checkpointer = MemorySaver()
-    graph = builder.compile(
-        checkpointer=checkpointer,
-        interrupt_before=["nodo_humano"],
-    )
+    graph = builder.compile(checkpointer=checkpointer)
     return graph
 
 
