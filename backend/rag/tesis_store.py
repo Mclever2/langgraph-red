@@ -15,6 +15,7 @@ Estrategia de chunking:
 """
 
 import logging
+import re
 
 import chromadb
 from langchain_chroma import Chroma
@@ -25,6 +26,23 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from backend.config import SECCIONES_TESIS
 
 logger = logging.getLogger(__name__)
+
+
+# ── Helpers de jerarquía de secciones ────────────────────────────────────────
+
+def _extraer_prefijo(nombre: str) -> str:
+    """Extrae el prefijo numérico de sección: '2.1. Título' → '2.1'"""
+    m = re.match(r'^(\d[\d\.]*)', nombre.strip())
+    return m.group(1).rstrip('.') if m else ""
+
+
+def _es_subseccion(nombre: str, prefijo_padre: str) -> bool:
+    """True si la sección pertenece al prefijo padre o es una subsección de él."""
+    if not prefijo_padre:
+        return False
+    p = _extraer_prefijo(nombre)
+    return p == prefijo_padre or p.startswith(prefijo_padre + ".")
+
 
 CHUNK_SIZE    = 600
 CHUNK_OVERLAP = 80
@@ -236,14 +254,41 @@ def recuperar_contexto(
 
     if top_meta:
         seccion_dominante = Counter(top_meta).most_common(1)[0][0]
-        # Devolver TODOS los fragmentos de esa sección (en orden de relevancia)
-        docs = [d for d in todos_docs
-                if d.metadata.get("seccion") == seccion_dominante]
-        docs = docs[:MAX_FRAGMENTOS_SECCION]
-        logger.info(
-            f"RAG tesis: sección '{seccion_dominante}' → "
-            f"{len(docs)} fragmentos devueltos"
-        )
+
+        # Paso 3: recuperación jerárquica.
+        # Si la sección query tiene prefijo numérico (ej. "2" para "2. MARCO TEÓRICO"),
+        # primero intentamos seleccionar directamente por ese prefijo en el store
+        # (recupera la sección Y todas sus subsecciones).
+        # Si no hay coincidencias directas (query UPAO que no existe en el PDF),
+        # recaemos en el prefijo de la sección dominante detectada.
+        prefijo_query = _extraer_prefijo(seccion)
+        if prefijo_query:
+            docs_directos = [d for d in todos_docs
+                             if _es_subseccion(d.metadata.get("seccion", ""), prefijo_query)]
+        else:
+            docs_directos = []
+
+        if docs_directos:
+            # Coincidencia directa: la sección del PDF existe en el store
+            docs = docs_directos[:MAX_FRAGMENTOS_SECCION]
+            logger.info(
+                f"RAG tesis: prefijo directo '{prefijo_query}' → "
+                f"{len(docs)} fragmentos devueltos (sección + subsecciones)"
+            )
+        else:
+            # Fallback: usar sección dominante + expansión jerárquica hacia abajo
+            prefijo_dom = _extraer_prefijo(seccion_dominante)
+            if prefijo_dom:
+                docs = [d for d in todos_docs
+                        if _es_subseccion(d.metadata.get("seccion", ""), prefijo_dom)]
+            else:
+                docs = [d for d in todos_docs
+                        if d.metadata.get("seccion") == seccion_dominante]
+            docs = docs[:MAX_FRAGMENTOS_SECCION]
+            logger.info(
+                f"RAG tesis: dominante '{seccion_dominante}' (prefijo '{prefijo_dom}') → "
+                f"{len(docs)} fragmentos devueltos (sección + subsecciones)"
+            )
     else:
         # Sin metadata de sección (chunking fijo antiguo): top-k clásico
         docs = todos_docs[:k]
@@ -253,3 +298,152 @@ def recuperar_contexto(
     resultado = "\n\n" + "\n\n---\n\n".join(fragmentos) + "\n"
     logger.info(f"RAG tesis: {len(resultado)} chars totales recuperados")
     return resultado
+
+
+# Consultas semánticas estructurales para contexto cruzado inteligente.
+# Cubren las posiciones clave de cualquier proyecto de tesis universitaria,
+# independientemente de la numeración que use cada documento.
+_CONSULTAS_CRUZADAS: dict[str, str] = {
+    "Título y delimitación":  "título investigación variables independiente dependiente espacio tiempo",
+    "Problema central":       "problema central formulación pregunta investigación planteamiento realidad",
+    "Objetivos":              "objetivo general específicos investigación derivan problema",
+    "Hipótesis":              "hipótesis relación variables supuesto básico específicas",
+    "Operacionalización":     "operacionalización variables dimensiones indicadores escala medición",
+    "Marco metodológico":     "tipo método diseño investigación cuantitativo cualitativo",
+    "Antecedentes / Marco teórico": "antecedentes investigaciones previas base teórica conceptos",
+}
+
+# Chars máximos por fragmento y total para no sobrecargar el contexto de los agentes
+_MAX_CHARS_POR_FRAGMENTO = 500
+_MAX_CHARS_CRUZADO       = 6_000
+
+
+def recuperar_contexto_cruzado(
+    vector_store: Chroma,
+    seccion_principal: str,
+) -> str:
+    """
+    Recupera contexto cruzado inteligente desde el vector store usando
+    consultas semánticas estructurales — sin depender de un mapa hardcodeado.
+
+    Objetivo: dar a los agentes fragmentos representativos de las secciones
+    del proyecto que son estructuralmente relevantes para cualquier evaluación
+    (problema, objetivos, hipótesis, variables, metodología…), excluyendo
+    la sección que ya se está evaluando en el contexto principal.
+
+    Los agentes reciben este contexto y deciden qué partes usar con criterio
+    propio para verificar coherencia cruzada.
+    """
+    prefijo_principal = _extraer_prefijo(seccion_principal)
+    partes: list[str] = []
+    prefijos_visitados: set[str] = set()
+    chars_acumulados = 0
+
+    for nombre_consulta, query in _CONSULTAS_CRUZADAS.items():
+        if chars_acumulados >= _MAX_CHARS_CRUZADO:
+            break
+        try:
+            docs = vector_store.similarity_search(query, k=6)
+            for doc in docs:
+                seccion_doc = doc.metadata.get("seccion", "")
+                prefijo_doc = _extraer_prefijo(seccion_doc)
+
+                # Excluir la sección principal y sus subsecciones
+                if prefijo_principal and prefijo_doc and _es_subseccion(seccion_doc, prefijo_principal):
+                    continue
+                # Deduplicar: solo un fragmento por prefijo de sección
+                if prefijo_doc in prefijos_visitados:
+                    continue
+
+                fragmento = doc.page_content[:_MAX_CHARS_POR_FRAGMENTO]
+                partes.append(f"**{seccion_doc}**\n{fragmento}")
+                prefijos_visitados.add(prefijo_doc)
+                chars_acumulados += len(fragmento)
+                break  # un fragmento representativo por consulta
+        except Exception as exc:
+            logger.warning(f"[Cross-context] Error en query '{nombre_consulta}': {exc}")
+
+    if not partes:
+        return ""
+
+    resultado = "\n\n---\n\n".join(partes)
+    logger.info(
+        f"[Cross-context] {len(partes)} secciones cruzadas recuperadas "
+        f"({chars_acumulados} chars) | excluido prefijo '{prefijo_principal}'"
+    )
+    return resultado
+
+
+def recuperar_vista_general(vector_store: Chroma) -> str:
+    """
+    Recupera un fragmento representativo de cada capítulo principal del documento.
+
+    Útil para la opción 'Vista general del proyecto': ofrece una panorámica
+    del documento completo sin entrar al detalle de ninguna sección específica.
+    Se toma el chunk más largo (más informativo) de cada capítulo (prefijo 1, 2, 3…).
+    """
+    try:
+        result = vector_store._collection.get(include=["metadatas", "documents"])
+        metadatas = result.get("metadatas") or []
+        documents = result.get("documents") or []
+
+        # Agrupar chunks por capítulo (primer dígito del prefijo)
+        por_capitulo: dict[str, list[tuple[str, str]]] = {}
+        for meta, doc in zip(metadatas, documents):
+            seccion = meta.get("seccion", "")
+            m = re.match(r'^(\d)', seccion.strip())
+            capitulo = m.group(1) if m else "?"
+            por_capitulo.setdefault(capitulo, []).append((seccion, doc))
+
+        partes: list[str] = []
+        for cap in sorted(por_capitulo.keys()):
+            secciones_cap = por_capitulo[cap]
+            # El chunk más largo = el más representativo del capítulo
+            mejor_seccion, mejor_doc = max(secciones_cap, key=lambda x: len(x[1]))
+            extracto = mejor_doc[:600]
+            partes.append(f"**{mejor_seccion}**\n{extracto}")
+
+        if not partes:
+            return ""
+
+        resultado = "\n\n---\n\n".join(partes)
+        logger.info(f"[Vista general] {len(partes)} capítulos representados ({len(resultado)} chars)")
+        return resultado
+
+    except Exception as exc:
+        logger.error(f"Error en recuperar_vista_general: {exc}")
+        return ""
+
+
+def obtener_stats_secciones(vector_store: Chroma) -> list[dict]:
+    """
+    Devuelve estadísticas por sección del vector store:
+      [{"seccion": str, "pagina_inicio": int, "chars": int, "n_fragmentos": int}]
+
+    Ordenado por página de inicio. Útil para mostrar al usuario cómo quedó
+    la división del PDF (número de caracteres por sección).
+    """
+    try:
+        result = vector_store._collection.get(include=["metadatas", "documents"])
+        metadatas = result.get("metadatas") or []
+        documents = result.get("documents") or []
+
+        stats: dict[str, dict] = {}
+        for meta, doc in zip(metadatas, documents):
+            seccion = meta.get("seccion", "Sin sección")
+            pag     = meta.get("pagina_inicio", 0)
+            chars   = len(doc)
+            if seccion not in stats:
+                stats[seccion] = {
+                    "seccion":       seccion,
+                    "pagina_inicio": pag,
+                    "chars":         0,
+                    "n_fragmentos":  0,
+                }
+            stats[seccion]["chars"]        += chars
+            stats[seccion]["n_fragmentos"] += 1
+
+        return sorted(stats.values(), key=lambda x: x["pagina_inicio"])
+    except Exception as exc:
+        logger.error(f"Error obteniendo stats de secciones: {exc}")
+        return []

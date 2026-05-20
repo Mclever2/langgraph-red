@@ -14,7 +14,10 @@ import uuid
 
 import streamlit as st
 
-from backend.rag import extraer_contenido_sin_indice, construir_vector_store, parse_rubrica_pdf
+from backend.rag import (
+    extraer_contenido_sin_indice, construir_vector_store,
+    parse_rubrica_pdf, obtener_stats_secciones,
+)
 
 from ..resources import embeddings_model
 from ..session_manager import reset_todo
@@ -52,11 +55,7 @@ def render_pantalla_upload() -> None:
 
         if st.session_state.pdf_hash == nuevo_hash:
             st.success(f"PDF '{st.session_state.pdf_nombre}' ya está vectorizado.")
-            toc = st.session_state.get("estructura_toc") or {}
-            if toc:
-                with st.expander(f"Estructura detectada ({len(toc)} secciones)"):
-                    for nombre_sec, pag in list(toc.items())[:20]:
-                        st.markdown(f"- **{nombre_sec}** — pág. {pag}")
+            _mostrar_stats_secciones()
         else:
             col_info, col_btn = st.columns([3, 1])
             with col_info:
@@ -158,11 +157,14 @@ def _vectorizar_tesis(pdf_bytes: bytes, nombre: str, nuevo_hash: str) -> None:
                 paginas, estructura_toc, embeddings_model, collection_name=collection_name
             )
 
-            st.session_state.vector_store  = vector_store
-            st.session_state.pdf_hash      = nuevo_hash
-            st.session_state.pdf_nombre    = nombre
-            st.session_state.thread_id     = str(uuid.uuid4())
+            st.session_state.vector_store   = vector_store
+            st.session_state.pdf_hash       = nuevo_hash
+            st.session_state.pdf_nombre     = nombre
+            st.session_state.thread_id      = str(uuid.uuid4())
             st.session_state.estructura_toc = estructura_toc
+
+            # Calcular y guardar stats de secciones para mostrarlas en pantalla
+            st.session_state.stats_secciones = obtener_stats_secciones(vector_store)
 
             status.update(label="PDF vectorizado correctamente (índice excluido)", state="complete")
 
@@ -171,6 +173,49 @@ def _vectorizar_tesis(pdf_bytes: bytes, nombre: str, nuevo_hash: str) -> None:
     except Exception as exc:
         st.session_state.error_msg = str(exc)
         st.rerun()
+
+
+def _mostrar_stats_secciones() -> None:
+    """Muestra un expander con las secciones del PDF y su conteo de caracteres."""
+    stats = st.session_state.get("stats_secciones")
+    vs    = st.session_state.get("vector_store")
+
+    # Si no hay stats cacheados pero sí vector_store, calcularlos ahora
+    if not stats and vs is not None:
+        stats = obtener_stats_secciones(vs)
+        st.session_state.stats_secciones = stats
+
+    if not stats:
+        toc = st.session_state.get("estructura_toc") or {}
+        if toc:
+            with st.expander(f"Estructura detectada ({len(toc)} secciones)"):
+                for nombre_sec, pag in list(toc.items())[:30]:
+                    st.markdown(f"- **{nombre_sec}** — pág. {pag}")
+        return
+
+    total_chars = sum(s["chars"] for s in stats)
+    total_frags = sum(s["n_fragmentos"] for s in stats)
+
+    with st.expander(
+        f"Fragmentación completada: {len(stats)} secciones · "
+        f"{total_frags} fragmentos · {total_chars:,} caracteres totales"
+    ):
+        cols = st.columns([4, 1, 1, 1])
+        cols[0].markdown("**Sección**")
+        cols[1].markdown("**Pág.**")
+        cols[2].markdown("**Chars**")
+        cols[3].markdown("**Frags**")
+        st.divider()
+        for s in stats:
+            chars = s["chars"]
+            frags = s["n_fragmentos"]
+            # Indicador visual: rojo si hay muy pocos chars (sección vacía/título solo)
+            alerta = " ⚠️" if chars < 200 else ""
+            cols = st.columns([4, 1, 1, 1])
+            cols[0].markdown(f"{s['seccion']}{alerta}")
+            cols[1].markdown(str(s["pagina_inicio"]))
+            cols[2].markdown(f"{chars:,}")
+            cols[3].markdown(str(frags))
 
 
 def _cargar_rubrica(rb_bytes: bytes, nombre: str, rb_hash: str) -> None:

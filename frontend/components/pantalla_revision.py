@@ -63,7 +63,8 @@ def render_pantalla_revision() -> None:
 
 def _render_metricas(n_iter: int, errores: list, pts, pts_max: int, rubrica) -> None:
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Iteraciones", f"{n_iter}/3")
+    max_iter_config = v.get("max_iteraciones", 1)
+    c1.metric("Iteraciones", f"{n_iter}/{max_iter_config}")
     c2.metric(
         "Errores finales",
         len(errores),
