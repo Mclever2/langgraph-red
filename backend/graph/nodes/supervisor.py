@@ -18,7 +18,7 @@ Protección anti-bucle infinito:
 
 import logging
 
-from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 
 from ..state import MentoriaState
@@ -80,6 +80,10 @@ def _validar_decision_semantica(siguiente: str, state: MentoriaState) -> str | N
     consenso_ok     = iter_consenso > n_iter
     disenso_ok      = iter_disenso > n_iter
 
+    # Ciclo completo: ya se generó texto y se alcanzó el máximo de iteraciones
+    if n_iter >= max_iter and state.get("texto_iterado") and siguiente != "fin":
+        return f"ciclo completo (iter {n_iter}/{max_iter}) con texto generado — debe ser fin"
+
     if siguiente == "fin":
         if not auditor_ok:
             return "fin sin auditor ejecutado"
@@ -109,7 +113,7 @@ def _validar_decision_semantica(siguiente: str, state: MentoriaState) -> str | N
     return None  # decisión válida
 
 
-def make_nodo_supervisor(llm: ChatGroq):
+def make_nodo_supervisor(llm: ChatOpenAI):
     """
     Fábrica del Supervisor Orquestador.
 
@@ -159,6 +163,22 @@ def make_nodo_supervisor(llm: ChatGroq):
                 "siguiente_nodo":           "fin",
                 "instrucciones_supervisor": f"Límite de pasos alcanzado ({pasos}). Fin forzado.",
                 "plan_supervisor":          "[FIN] Límite de pasos alcanzado",
+                "pasos_ejecutados":         pasos + 1,
+            }
+
+        # ── Terminación determinista: ciclo completo sin llamar al LLM ────────
+        # Cuando numero_iteracion >= max_iteraciones y ya existe texto_iterado,
+        # el ciclo terminó. El auditor_ok check (iter_auditada > n_iter) da False
+        # porque el redactor ya incrementó numero_iteracion, causando bucle infinito.
+        # Esta guarda corta antes del LLM y evita esas llamadas innecesarias.
+        if n_iter >= max_iter and state.get("texto_iterado"):
+            logger.info(
+                f"[Supervisor] Ciclo completo: iter {n_iter}/{max_iter} con texto generado → fin"
+            )
+            return {
+                "siguiente_nodo":           "fin",
+                "instrucciones_supervisor": f"Ciclo {n_iter}/{max_iter} completado con texto mejorado.",
+                "plan_supervisor":          "[FIN] Ciclo completado",
                 "pasos_ejecutados":         pasos + 1,
             }
 

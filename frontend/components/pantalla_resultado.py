@@ -25,6 +25,7 @@ def render_pantalla_resultado() -> None:
 
     seccion  = v.get("seccion_objetivo", "—")
     n_iter   = v.get("numero_iteracion", 0)
+    max_iter = v.get("max_iteraciones", 3)
     pts      = v.get("puntaje_estimado")
     rubrica  = v.get("rubrica_dinamica")
 
@@ -42,7 +43,7 @@ def render_pantalla_resultado() -> None:
         f"tras **{n_iter} iteración(es)** automática(s)."
     )
 
-    _render_metricas_finales(n_iter, pts, pts_max, rubrica)
+    _render_metricas_finales(n_iter, max_iter, pts, pts_max, rubrica)
     st.divider()
 
     tab_eval, tab_debate, tab_rag, tab_reportes = st.tabs([
@@ -87,9 +88,9 @@ def _buscar_pts_max(seccion: str) -> int:
 
 # ── Métricas superiores ───────────────────────────────────────────────────────
 
-def _render_metricas_finales(n_iter: int, pts, pts_max: int, rubrica) -> None:
+def _render_metricas_finales(n_iter: int, max_iter: int, pts, pts_max: int, rubrica) -> None:
     mc1, mc2, mc3 = st.columns(3)
-    mc1.metric("Iteraciones automáticas", f"{n_iter}/3")
+    mc1.metric("Iteraciones automáticas", f"{n_iter}/{max_iter}")
 
     if pts and pts_max and pts_max > 0:
         mc2.metric("Puntaje de sección", badge_puntaje(int(pts), pts_max))

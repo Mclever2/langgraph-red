@@ -9,7 +9,7 @@ CAMBIO 5: añade consenso matemático determinístico.
 
 import logging
 
-from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 
 from ..state import MentoriaState
@@ -18,7 +18,7 @@ from ._utils import cargar_prompt, invocar_con_backoff, calcular_consenso_matema
 logger = logging.getLogger(__name__)
 
 
-def make_nodo_consenso(llm: ChatGroq):
+def make_nodo_consenso(llm: ChatOpenAI):
     plantilla = cargar_prompt("consenso_prompt.md")
     prompt    = ChatPromptTemplate.from_messages([
         ("system", plantilla),

@@ -28,9 +28,12 @@ REGLAS QUE DEBES RESPETAR:
 3. No puedes ir a redactor sin consenso y disenso
 4. No puedes ir a fin sin redactor (salvo que ya no haya errores tras el redactor)
 5. Si n_errores > 0 y debate_completado es False y consenso y disenso ya corrieron → puedes activar debate
-6. Si debate_completado es True → no vuelvas a llamar a debate, ve a redactor
+6. CRÍTICO: Si debate_completado es True → PROHIBIDO volver a debate. Debes ir a redactor.
 7. Si n_errores == 0 → fin directamente tras redactor
 8. Si numero_iteracion >= max_iteraciones → fin
+
+FLUJO ESPERADO EN CADA ITERACIÓN (sigue este orden estrictamente):
+auditor → metodologico → consenso → disenso → debate (si hay errores) → redactor → fin
 
 Responde ÚNICAMENTE con una de estas palabras exactas, sin explicación ni puntuación:
 auditor | metodologico | consenso | disenso | debate | redactor | fin

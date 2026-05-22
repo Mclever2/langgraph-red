@@ -22,10 +22,9 @@ ARQUITECTURA:
 
 import logging
 import os
-import time
 from typing import List
 
-from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
@@ -116,7 +115,7 @@ def _construir_rubrica(state: MentoriaState, seccion: str) -> tuple[str, int, st
 
 # ── Fábrica del nodo ──────────────────────────────────────────────────────────
 
-def make_nodo_auditor(llm: ChatGroq):
+def make_nodo_auditor(llm: ChatOpenAI):
     """
     Construye el Nodo Auditor con panel de 3 subagentes (LoRA + MCP).
     Cada subagente usa el mismo modelo base pero con rol especializado distinto.
@@ -126,7 +125,6 @@ def make_nodo_auditor(llm: ChatGroq):
 
     def nodo_auditor(state: MentoriaState) -> dict:
         logger.info("[Auditor] Iniciando panel de 3 subagentes (LoRA + MCP)...")
-        time.sleep(3)  # anti-rate-limit inicial
 
         seccion     = state["seccion_objetivo"]
         n_iter      = state.get("numero_iteracion", 0)
@@ -185,9 +183,8 @@ def make_nodo_auditor(llm: ChatGroq):
         # ── Construir sub_items: (chain, lora_id, mcp_fetch_fn) ──────────────
         sub_items = []
         for lora in loras:
-            # LLM con temperatura específica del LoRA
-            sub_llm = ChatGroq(
-                api_key=_obtener_api_key(lora.temperatura),
+            sub_llm = ChatOpenAI(
+                api_key=os.getenv("OPENAI_API_KEY", ""),
                 model=model_name,
                 temperature=lora.temperatura,
                 max_retries=2,
@@ -261,11 +258,3 @@ def make_nodo_auditor(llm: ChatGroq):
     return nodo_auditor
 
 
-def _obtener_api_key(temperatura: float) -> str:
-    """Rota entre claves Groq disponibles según el índice del subagente."""
-    try:
-        from config import Config
-        idx = {0.05: 0, 0.15: 1, 0.25: 2}.get(temperatura, 0)
-        return Config.get_next_groq_key(idx)
-    except Exception:
-        return os.getenv("GROQ_KEY_AUDITOR") or os.getenv("GROQ_API_KEY", "")

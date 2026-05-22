@@ -30,7 +30,7 @@ DEBATE CON MEMORIA COMPARTIDA:
 import logging
 import os
 
-from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 
 from ..state import MentoriaState
@@ -40,13 +40,12 @@ from ._panel_utils import ejecutar_panel, consolidar_panel_texto, ResultadoSubag
 logger = logging.getLogger(__name__)
 
 
-def make_nodo_disenso(llm: ChatGroq):
+def make_nodo_disenso(llm: ChatOpenAI):
     """
     Construye el Nodo Disenso con panel de 2 subagentes (LoRA).
     """
     prompt_base = cargar_prompt("disenso_prompt.md")
-    model_name  = getattr(llm, "model_name", "llama-3.3-70b-versatile")
-    api_key_base = os.getenv("GROQ_KEY_DISENSO") or os.getenv("GROQ_API_KEY", "")
+    model_name  = getattr(llm, "model_name", "gpt-4o-mini")
 
     def nodo_disenso(state: MentoriaState) -> dict:
         n_iter    = state.get("numero_iteracion", 1)
@@ -84,17 +83,10 @@ def make_nodo_disenso(llm: ChatGroq):
 
         # ── Construir sub_items ───────────────────────────────────────────────
         sub_items = []
-        api_keys = [api_key_base, api_key_base]
-        try:
-            from config import Config
-            api_keys = [Config.get_next_groq_key(i) for i in range(2)]
-            api_keys = [k for k in api_keys if k] or [api_key_base, api_key_base]
-        except Exception:
-            pass
 
         for idx, lora in enumerate(loras):
-            sub_llm = ChatGroq(
-                api_key=api_keys[idx % len(api_keys)],
+            sub_llm = ChatOpenAI(
+                api_key=os.getenv("OPENAI_API_KEY", ""),
                 model=model_name,
                 temperature=lora.temperatura,
                 max_retries=2,

@@ -16,7 +16,7 @@ import logging
 import time
 from typing import List, Optional
 
-from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
@@ -163,7 +163,7 @@ del debate fueron determinantes para cada ítem.\
 """
 
 
-def make_nodo_debate(llm_auditor: ChatGroq, llm_metodologico: ChatGroq):
+def make_nodo_debate(llm_auditor: ChatOpenAI, llm_metodologico: ChatOpenAI):
     """Fábrica del nodo debate unificado con panel de 4 subagentes."""
 
     # Chain 1: perspectiva formal (llm_auditor — precisión 0.1)

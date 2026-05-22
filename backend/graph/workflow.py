@@ -23,7 +23,7 @@ import os
 from dotenv import load_dotenv
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
-from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 
 from .state import MentoriaState
 from .nodes import (
@@ -43,17 +43,17 @@ load_dotenv()
 RECURSION_LIMIT = 80
 
 
-def _llm(env_key: str, temperatura: float = 0.3) -> ChatGroq:
-    """Crea un ChatGroq con la clave de API específica del agente."""
-    api_key = os.getenv(env_key) or os.getenv("GROQ_API_KEY")
+def _llm(temperatura: float = 0.3) -> ChatOpenAI:
+    """Crea un ChatOpenAI con la clave de API de OpenAI."""
+    api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise ValueError(
-            f"No se encontró '{env_key}' ni 'GROQ_API_KEY'. "
-            "Configura tu .env con las claves de Groq."
+            "No se encontró 'OPENAI_API_KEY'. "
+            "Configura tu .env con tu clave de OpenAI."
         )
-    return ChatGroq(
+    return ChatOpenAI(
         api_key=api_key,
-        model="llama-3.3-70b-versatile",
+        model="gpt-4o-mini",
         temperature=temperatura,
         max_retries=2,
     )
@@ -62,13 +62,13 @@ def _llm(env_key: str, temperatura: float = 0.3) -> ChatGroq:
 def create_graph():
     """Construye y compila el StateGraph de red multiagente pura."""
 
-    # ── Un LLM por agente (clave API propia → rate limits distribuidos) ───────
-    llm_supervisor   = _llm("GROQ_KEY_SUPERVISOR",   temperatura=0.2)
-    llm_redactor     = _llm("GROQ_KEY_REDACTOR",     temperatura=0.4)
-    llm_auditor      = _llm("GROQ_KEY_AUDITOR",      temperatura=0.1)
-    llm_metodologico = _llm("GROQ_KEY_METODOLOGICO", temperatura=0.2)
-    llm_consenso     = _llm("GROQ_KEY_CONSENSO",     temperatura=0.2)
-    llm_disenso      = _llm("GROQ_KEY_DISENSO",      temperatura=0.2)
+    # ── Un LLM por agente — misma clave OpenAI, temperatura distinta por rol ──
+    llm_supervisor   = _llm(temperatura=0.2)
+    llm_redactor     = _llm(temperatura=0.4)
+    llm_auditor      = _llm(temperatura=0.1)
+    llm_metodologico = _llm(temperatura=0.2)
+    llm_consenso     = _llm(temperatura=0.2)
+    llm_disenso      = _llm(temperatura=0.2)
 
     builder = StateGraph(MentoriaState)
 

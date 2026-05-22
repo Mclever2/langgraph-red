@@ -103,6 +103,7 @@ def make_nodo_exportador():
             "texto_final":   state.get("texto_iterado", ""),
             "puntaje_inicial": state.get("puntaje_inicial", 0.0),
             "puntaje_final":   state.get("puntaje_estimado"),
+            "puntaje_maximo":  state.get("_puntaje_max"),
             "iteraciones_realizadas": state.get("numero_iteracion", 0),
             "historial_debate": _serializar_historial(historial_raw),
             "debate_veredicto": debate_vered,
@@ -339,7 +340,7 @@ def _guardar_debate_como_embeddings(
     try:
         import chromadb
         from langchain_huggingface import HuggingFaceEmbeddings
-        from langchain_community.vectorstores import Chroma
+        from langchain_chroma import Chroma
         from langchain_core.documents import Document
 
         os.makedirs(_DEBATE_CHROMA_PATH, exist_ok=True)

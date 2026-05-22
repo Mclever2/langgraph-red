@@ -1,0 +1,29 @@
+{
+  "run_id": "8e03d91a-5183-4933-8445-b28900172e53",
+  "arquitectura": "langgraph-hub-spoke",
+  "universidad": "upao",
+  "metricas": {
+    "rouge1_f": 0.7707,
+    "rouge2_f": 0.6691,
+    "rougeL_f": 0.605,
+    "bleu_score": 0.5795,
+    "similitud_coseno": 0.9485,
+    "interpretacion": "mejora alta",
+    "kappa": 0.0,
+    "nota": "desacuerdo total — debate muy polarizado",
+    "turnos_analizados": 2,
+    "detalle": {
+      "etiquetas_auditor": [
+        0,
+        1
+      ],
+      "etiquetas_metodologo": [
+        1,
+        1
+      ]
+    },
+    "gain_score": 1.0,
+    "puntaje_inicial": 0.0,
+    "puntaje_final": 5.0
+  }
+}

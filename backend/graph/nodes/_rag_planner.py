@@ -18,14 +18,14 @@ from __future__ import annotations
 import logging
 import time
 
-from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 
 from backend.rag.rag_context import get_vector_store, buscar_fragmentos
 
 logger = logging.getLogger(__name__)
 
-_PAUSA_POST_PLANIFICACION = 2.0  # segundos anti-rate-limit tras la llamada de planificación
+_PAUSA_POST_PLANIFICACION = 0.3  # segundos entre planificación y queries (OpenAI no necesita pausa larga)
 
 _PROMPT_PLANNER = """\
 Eres {rol} y estás a punto de evaluar la sección "{seccion}" de un proyecto de tesis universitaria.
@@ -47,7 +47,7 @@ población muestra técnica instrumento recolección datos"""
 
 
 def obtener_contexto_dinamico(
-    llm: ChatGroq,
+    llm: ChatOpenAI,
     seccion: str,
     texto_snippet: str,
     rol: str,

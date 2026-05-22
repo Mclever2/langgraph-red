@@ -28,9 +28,8 @@ DEBATE CON MEMORIA COMPARTIDA:
 
 import logging
 import os
-import time
 
-from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 
 from ..state import MentoriaState
@@ -41,7 +40,7 @@ from ._panel_utils import ejecutar_panel, consolidar_panel_texto, ResultadoSubag
 logger = logging.getLogger(__name__)
 
 
-def make_nodo_metodologico(llm: ChatGroq):
+def make_nodo_metodologico(llm: ChatOpenAI):
     """
     Construye el Nodo Metodólogo con panel de 2 subagentes (LoRA + MCP).
     """
@@ -53,7 +52,6 @@ def make_nodo_metodologico(llm: ChatGroq):
 
     def nodo_metodologico(state: MentoriaState) -> dict:
         logger.info("[Metodólogo] Iniciando panel de 2 subagentes (LoRA + MCP)...")
-        time.sleep(5)  # anti-rate-limit inicial (el metodólogo siempre espera más)
 
         seccion     = state["seccion_objetivo"]
         n_iter      = state.get("numero_iteracion", 0)
@@ -103,11 +101,10 @@ def make_nodo_metodologico(llm: ChatGroq):
 
         # ── Construir sub_items ───────────────────────────────────────────────
         sub_items = []
-        api_keys = _obtener_api_keys_metodologo()
 
         for idx, lora in enumerate(loras):
-            sub_llm = ChatGroq(
-                api_key=api_keys[idx % len(api_keys)],
+            sub_llm = ChatOpenAI(
+                api_key=os.getenv("OPENAI_API_KEY", ""),
                 model=model_name,
                 temperature=lora.temperatura,
                 max_retries=2,
@@ -168,13 +165,3 @@ def make_nodo_metodologico(llm: ChatGroq):
     return nodo_metodologico
 
 
-def _obtener_api_keys_metodologo() -> list[str]:
-    """Retorna lista de API keys disponibles para los subagentes del metodólogo."""
-    base = os.getenv("GROQ_KEY_METODOLOGICO") or os.getenv("GROQ_API_KEY", "")
-    # Intentar obtener keys rotativas del Config global
-    try:
-        from config import Config
-        keys = [Config.get_next_groq_key(i) for i in range(2)]
-        return [k for k in keys if k] or [base]
-    except Exception:
-        return [base, base]

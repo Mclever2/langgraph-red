@@ -1,8 +1,9 @@
 # ── Core LangChain / LangGraph ───────────────────────────────────────────────
 langgraph>=0.2.28
-langchain-groq>=0.2.0
+langchain-openai>=0.2.0
 langchain-core>=0.3.0
-langchain-community>=0.3.0          # Chroma vectorstore
+langchain-community>=0.3.0          # loaders varios
+langchain-chroma>=0.1.4             # Chroma vectorstore (reemplaza langchain_community.vectorstores.Chroma)
 langchain-huggingface>=0.1.2        # HuggingFaceEmbeddings (local, gratis)
 langchain-text-splitters>=0.3.0     # RecursiveCharacterTextSplitter
 
