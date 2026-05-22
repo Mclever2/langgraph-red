@@ -50,6 +50,16 @@ def _get_biblioteca(_embeddings):
 
 
 # ── Instancias globales (se crean una vez al importar este módulo) ────────────
-embeddings_model = _get_embeddings()
-graph            = _get_graph()
-biblioteca       = _get_biblioteca(embeddings_model)
+# Envuelto en try/except para que cualquier error interno sea visible en lugar
+# de quedar oculto tras "ImportError: cannot import name 'init_session'".
+try:
+    embeddings_model = _get_embeddings()
+    graph            = _get_graph()
+    biblioteca       = _get_biblioteca(embeddings_model)
+except Exception as _startup_err:
+    import traceback
+    logger.error(
+        f"[resources] Error crítico al inicializar singletons:\n"
+        f"{traceback.format_exc()}"
+    )
+    raise

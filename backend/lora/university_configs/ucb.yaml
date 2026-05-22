@@ -1,0 +1,28 @@
+nombre: "Universidad Católica Boliviana San Pablo"
+codigo: "ucb"
+pais: "Bolivia"
+
+contexto_institucional: |
+  Evalúas una tesis de la Universidad Católica Boliviana San Pablo (UCB), Bolivia.
+  - La rúbrica UCB usa escala cualitativa convertida a puntaje numérico por el evaluador.
+  - Las referencias siguen normas APA 7ma edición o Vancouver según la carrera.
+  - La UCB enfatiza el enfoque humanista y la responsabilidad social en la investigación.
+  - Considera el contexto boliviano en temas de acceso a tecnología y recursos.
+
+programas:
+  ingenieria_de_sistemas:
+    nombre_completo: "Ingeniería de Sistemas e Informática"
+    enfasis_evaluacion: |
+      - Validar que la solución propuesta sea viable en el contexto tecnológico boliviano.
+      - Las herramientas y tecnologías usadas deben estar justificadas para el entorno local.
+      - El aporte social o económico del proyecto debe estar documentado.
+      - Si incluye software: debe haber pruebas de usabilidad o aceptación de usuario.
+    drive_folder_id: null
+
+  administracion:
+    nombre_completo: "Administración de Empresas"
+    enfasis_evaluacion: |
+      - El marco teórico debe conectar con teorías de administración reconocidas.
+      - Los instrumentos cuantitativos deben reportar Alpha de Cronbach para validez.
+      - Las conclusiones deben generar recomendaciones accionables para las organizaciones.
+    drive_folder_id: null

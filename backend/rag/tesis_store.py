@@ -142,6 +142,62 @@ def _secciones_a_documentos(
     return docs
 
 
+# Palabras vacías del español que no aportan al matching de secciones
+_STOP_WORDS = {
+    "de", "del", "la", "el", "los", "las", "un", "una", "y", "e", "o", "u",
+    "con", "en", "al", "para", "por", "que", "se", "su", "sus", "es", "son",
+    "a", "ante", "bajo", "desde", "sin", "sobre", "tras", "como",
+}
+
+
+def _palabras_clave(texto: str) -> set[str]:
+    """Extrae palabras significativas (sin números, puntuación ni stop words)."""
+    tokens = re.sub(r'[\d\.\,\-–\(\)\[\]/]', ' ', texto.lower()).split()
+    return {t for t in tokens if len(t) > 2 and t not in _STOP_WORDS}
+
+
+def _buscar_query_semantica(seccion: str) -> str:
+    """
+    Elige la query de SECCIONES_TESIS más adecuada para una sección del TOC del PDF.
+
+    Estrategia en tres pasos:
+      1. Nombre exacto (más fiable).
+      2. Overlap de palabras clave (robusto a formatos Proyecto vs Informe de Tesis).
+      3. Prefijo numérico (último recurso; puede ser ambiguo entre formatos).
+
+    El matching por palabras clave evita confundir, p.ej.,
+    "2.2. Objetivos de la investigación" (Informe) con
+    "2.2 Investigaciones antecedentes" (Proyecto) aunque compartan el prefijo 2.2.
+    """
+    # 1. Coincidencia exacta
+    for sec in SECCIONES_TESIS:
+        if sec["nombre"] == seccion:
+            return sec["query"]
+
+    # 2. Mayor overlap de palabras clave (ignora números y stop words)
+    kw_seccion = _palabras_clave(seccion)
+    if kw_seccion:
+        mejor_score = 0
+        mejor_query: str | None = None
+        for sec in SECCIONES_TESIS:
+            score = len(kw_seccion & _palabras_clave(sec["nombre"]))
+            if score > mejor_score:
+                mejor_score = score
+                mejor_query = sec["query"]
+        if mejor_score >= 1 and mejor_query:
+            return mejor_query
+
+    # 3. Prefijo numérico (fallback)
+    prefijo = _extraer_prefijo(seccion)
+    if prefijo:
+        for sec in SECCIONES_TESIS:
+            p = _extraer_prefijo(sec["nombre"])
+            if p and p == prefijo:
+                return sec["query"]
+
+    return seccion  # último recurso: usar el nombre literal
+
+
 # ── API pública ───────────────────────────────────────────────────────────────
 
 def construir_vector_store(
@@ -226,11 +282,7 @@ def recuperar_contexto(
     """
     from collections import Counter
 
-    query = seccion  # fallback si no hay entrada en SECCIONES_TESIS
-    for sec in SECCIONES_TESIS:
-        if sec["nombre"] == seccion:
-            query = sec["query"]
-            break
+    query = _buscar_query_semantica(seccion)
 
     logger.info(f"RAG tesis → '{seccion}' | query: '{query[:55]}…'")
 

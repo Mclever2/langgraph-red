@@ -93,7 +93,7 @@ def _calcular_metricas(state: dict) -> dict:
         "metadata": {
             "seccion":            state.get("seccion_objetivo", ""),
             "numero_iteraciones": state.get("numero_iteracion", 0),
-            "rondas_debate":      state.get("ronda_debate", 0),
+            "debate_completado":   state.get("debate_completado", False),
             "timestamp":          datetime.now().isoformat(),
         },
         "metricas": {

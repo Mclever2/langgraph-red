@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 NODOS_VALIDOS = {
     "auditor", "metodologico", "consenso", "disenso",
-    "debate_auditor", "debate_metodologo", "redactor", "fin"
+    "debate", "redactor", "fin"
 }
 
 
@@ -37,13 +37,11 @@ def _fallback_routing(state: MentoriaState) -> str:
     Fallback determinista SOLO si el LLM falla o devuelve valor inválido.
     Este es el último recurso, no el camino normal.
     """
-    n_iter     = state.get("numero_iteracion", 0)
-    max_iter   = state.get("max_iteraciones", 3)
-    n_errores  = len(state.get("errores_rubrica") or [])
-    ronda      = state.get("ronda_debate", 0)
-    max_rondas = state.get("max_rondas_debate", 2)
-    pasos      = state.get("pasos_ejecutados", 0)
-    max_pasos  = state.get("max_pasos_red", 40)
+    n_iter    = state.get("numero_iteracion", 0)
+    max_iter  = state.get("max_iteraciones", 3)
+    n_errores = len(state.get("errores_rubrica") or [])
+    pasos     = state.get("pasos_ejecutados", 0)
+    max_pasos = state.get("max_pasos_red", 40)
 
     if pasos >= max_pasos:
         return "fin"
@@ -55,11 +53,8 @@ def _fallback_routing(state: MentoriaState) -> str:
         return "consenso"
     if not state.get("iter_disenso"):
         return "disenso"
-    if n_errores > 0 and ronda < max_rondas:
-        if state.get("debate_auditor_ronda", 0) <= ronda:
-            return "debate_auditor"
-        if state.get("debate_metodologo_ronda", 0) <= ronda:
-            return "debate_metodologo"
+    if n_errores > 0 and not state.get("debate_completado", False):
+        return "debate"
     if state.get("texto_iterado") is None or (n_errores > 0 and n_iter < max_iter):
         return "redactor"
     return "fin"
@@ -70,16 +65,15 @@ def _validar_decision_semantica(siguiente: str, state: MentoriaState) -> str | N
     Valida que la decisión del LLM sea semánticamente coherente con el estado.
     Retorna None si es válida, o un string con el motivo del rechazo si no lo es.
     """
-    n_iter     = state.get("numero_iteracion", 0)
-    max_iter   = state.get("max_iteraciones", 3)
-    n_errores  = len(state.get("errores_rubrica") or [])
-    ronda      = state.get("ronda_debate", 0)
-    max_rondas = state.get("max_rondas_debate", 2)
-    iter_auditada           = state.get("iter_auditada", 0)
-    iter_metodologica       = state.get("iter_metodologica", 0)
-    iter_consenso           = state.get("iter_consenso", 0)
-    iter_disenso            = state.get("iter_disenso", 0)
-    debate_auditor_ronda    = state.get("debate_auditor_ronda", 0)
+    n_iter    = state.get("numero_iteracion", 0)
+    max_iter  = state.get("max_iteraciones", 3)
+    n_errores = len(state.get("errores_rubrica") or [])
+
+    iter_auditada     = state.get("iter_auditada", 0)
+    iter_metodologica = state.get("iter_metodologica", 0)
+    iter_consenso     = state.get("iter_consenso", 0)
+    iter_disenso      = state.get("iter_disenso", 0)
+    debate_completado = state.get("debate_completado", False)
 
     auditor_ok      = iter_auditada > n_iter
     metodologico_ok = iter_metodologica > n_iter
@@ -106,11 +100,11 @@ def _validar_decision_semantica(siguiente: str, state: MentoriaState) -> str | N
     if siguiente == "disenso" and (not auditor_ok or not metodologico_ok):
         return "disenso sin auditor y metodólogo completos"
 
-    if siguiente == "debate_metodologo" and debate_auditor_ronda <= ronda:
-        return "debate_metodologo sin debate_auditor previo en esta ronda"
+    if siguiente == "debate" and n_errores == 0:
+        return "debate sin errores activos"
 
-    if siguiente == "debate_auditor" and n_errores == 0:
-        return "debate_auditor sin errores activos"
+    if siguiente == "debate" and debate_completado:
+        return "debate ya ejecutado en esta iteración — ir a redactor"
 
     return None  # decisión válida
 
@@ -134,20 +128,17 @@ def make_nodo_supervisor(llm: ChatGroq):
     chain = prompt | llm
 
     def nodo_supervisor(state: MentoriaState) -> dict:
-        pasos      = state.get("pasos_ejecutados", 0)
-        max_pasos  = state.get("max_pasos_red", 30)
-        n_iter     = state.get("numero_iteracion", 0)
-        max_iter   = state.get("max_iteraciones", 3)
-        n_errores  = len(state.get("errores_rubrica") or [])
-        ronda      = state.get("ronda_debate", 0)
-        max_rondas = state.get("max_rondas_debate", 2)
+        pasos     = state.get("pasos_ejecutados", 0)
+        max_pasos = state.get("max_pasos_red", 30)
+        n_iter    = state.get("numero_iteracion", 0)
+        max_iter  = state.get("max_iteraciones", 3)
+        n_errores = len(state.get("errores_rubrica") or [])
 
-        iter_auditada           = state.get("iter_auditada", 0)
-        iter_metodologica       = state.get("iter_metodologica", 0)
-        iter_consenso           = state.get("iter_consenso", 0)
-        iter_disenso            = state.get("iter_disenso", 0)
-        debate_auditor_ronda    = state.get("debate_auditor_ronda", 0)
-        debate_metodologo_ronda = state.get("debate_metodologo_ronda", 0)
+        iter_auditada     = state.get("iter_auditada", 0)
+        iter_metodologica = state.get("iter_metodologica", 0)
+        iter_consenso     = state.get("iter_consenso", 0)
+        iter_disenso      = state.get("iter_disenso", 0)
+        debate_completado = state.get("debate_completado", False)
 
         auditor_ok      = iter_auditada > n_iter
         metodologico_ok = iter_metodologica > n_iter
@@ -158,7 +149,7 @@ def make_nodo_supervisor(llm: ChatGroq):
             f"[Supervisor] Paso {pasos + 1}/{max_pasos} | "
             f"Iter {n_iter}/{max_iter} | Errores={n_errores} | "
             f"Aud={'✓' if auditor_ok else '✗'} Met={'✓' if metodologico_ok else '✗'} "
-            f"Debate={ronda}/{max_rondas}"
+            f"Debate={'✓' if debate_completado else '✗'}"
         )
 
         # ── Protección anti-bucle (capa semántica) ────────────────────────────
@@ -173,20 +164,17 @@ def make_nodo_supervisor(llm: ChatGroq):
 
         # ── Construir contexto para el LLM ────────────────────────────────────
         llm_input = {
-            "seccion":              state.get("seccion_objetivo", ""),
-            "numero_iteracion":     n_iter,
-            "max_iteraciones":      max_iter,
-            "auditor_ok":           auditor_ok,
-            "metodologico_ok":      metodologico_ok,
-            "consenso_ok":          consenso_ok,
-            "disenso_ok":           disenso_ok,
-            "n_errores":            n_errores,
-            "ronda_debate":         ronda,
-            "max_rondas_debate":    max_rondas,
-            "debate_auditor_ok":    debate_auditor_ronda > ronda,
-            "debate_metodologo_ok": debate_metodologo_ronda > ronda,
-            "puntaje_estimado":     state.get("puntaje_estimado"),
-            "tiene_texto_iterado":  bool(state.get("texto_iterado")),
+            "seccion":             state.get("seccion_objetivo", ""),
+            "numero_iteracion":    n_iter,
+            "max_iteraciones":     max_iter,
+            "auditor_ok":          auditor_ok,
+            "metodologico_ok":     metodologico_ok,
+            "consenso_ok":         consenso_ok,
+            "disenso_ok":          disenso_ok,
+            "n_errores":           n_errores,
+            "debate_completado":   debate_completado,
+            "puntaje_estimado":    state.get("puntaje_estimado"),
+            "tiene_texto_iterado": bool(state.get("texto_iterado")),
         }
 
         # ── El LLM decide el siguiente nodo ───────────────────────────────────
@@ -210,12 +198,11 @@ def make_nodo_supervisor(llm: ChatGroq):
             logger.warning(f"[Supervisor] LLM falló ({exc}) → fallback")
             siguiente = _fallback_routing(state)
 
-        # ── Resetear contadores de debate al enrutar al Redactor ─────────────
+        # ── Resetear estado de debate al enrutar al Redactor ─────────────────
+        # Permite que debate corra de nuevo en la siguiente iteración si hay errores.
         extra = {
-            "ronda_debate":             0,
-            "debate_auditor_ronda":     0,
-            "debate_metodologo_ronda":  0,
-            "argumento_debate_auditor": "",
+            "debate_completado": False,
+            "debate_memory":     [],
         } if siguiente == "redactor" else {}
 
         return {

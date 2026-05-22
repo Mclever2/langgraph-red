@@ -1,138 +1,347 @@
 """
-ARCHIVO OBSOLETO — Reemplazado por debate_auditor.py y debate_metodologo.py
+Nodo Debate — Panel de 4 subagentes con memoria compartida.
 
-El debate ahora es inter-agente real: dos nodos separados en el grafo
-que se comunican exclusivamente a través del estado compartido (MentoriaState).
+Reemplaza los nodos debate_auditor y debate_metodologo.
+Los 4 subagentes comparten debate_memory (lista de dicts acumulada) y
+corren secuencialmente: cada uno lee el historial completo antes de escribir.
 
-  - debate_auditor.py   → nodo_debate_auditor   (Auditor escribe al estado)
-  - debate_metodologo.py → nodo_debate_metodologo (Metodólogo lee del estado)
+Flujo interno:
+  perspectiva_formal → perspectiva_metodologica → perspectiva_contextual → sintetizador_debate
 
-Flujo en el grafo:
-  Supervisor → nodo_debate_auditor  → Supervisor
-  Supervisor → nodo_debate_metodologo → Supervisor
-
-Este archivo ya no es importado por nodes/__init__.py ni por workflow.py.
+El sintetizador emite un veredicto estructurado (confirmado/descartado/matizado por ítem)
+y actualiza errores_rubrica eliminando los ítems descartados.
 """
 
-import time
 import logging
-from typing import List
+import time
+from typing import List, Optional
 
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
-from ..state import MentoriaState, ErrorRubrica, RondaDebate
-from ._utils import cargar_prompt, invocar_con_backoff
+from ..state import MentoriaState, ErrorRubrica
+from ._utils import invocar_con_backoff
 
 logger = logging.getLogger(__name__)
 
-
-class ItemResolucion(BaseModel):
-    item_numero: int = Field(description="Número del ítem de la rúbrica")
-    decision: str = Field(
-        description="'confirmado' si el error es real y debe corregirse, "
-                    "'descartado' si el argumento del Auditor no tiene base metodológica suficiente"
-    )
-    razon: str = Field(description="Razón metodológica de la decisión (1-2 oraciones)")
+_PAUSA_ENTRE_SUBS = 3.0  # segundos anti-rate-limit Groq
 
 
-class ResolucionDebate(BaseModel):
-    items_resolucion: List[ItemResolucion] = Field(
-        description="Resolución ítem por ítem de todos los errores argumentados"
-    )
-    posicion_metodologica: str = Field(
-        description="Respuesta narrativa completa del Metodólogo al argumento del Auditor"
-    )
+# ── Modelo de salida estructurada del sintetizador ────────────────────────────
+
+class VeredictoPanelDebate(BaseModel):
     items_confirmados: List[int] = Field(
-        description="Números de ítems confirmados como errores reales que el Redactor debe corregir"
+        description="Números de ítems de rúbrica confirmados como errores reales (≥2/3 perspectivas)"
     )
     items_descartados: List[int] = Field(
-        description="Números de ítems descartados — no son errores reales o no tienen base suficiente"
+        description="Números de ítems descartados — no son errores reales (≥2/3 perspectivas)"
     )
+    items_matizados: List[int] = Field(
+        description="Números de ítems matizados — contradicción entre perspectivas, se mantienen con menor peso"
+    )
+    justificacion: str = Field(
+        description="Justificación narrativa del veredicto (2-4 oraciones)"
+    )
+    veredicto_general: str = Field(
+        description="'confirmado' si la mayoría de errores persisten, 'descartado' si la mayoría se eliminan, 'matizado' si hay empate o contradicción fundamental"
+    )
+
+
+# ── Prompts de los 4 subagentes ───────────────────────────────────────────────
+
+_PROMPT_FORMAL = """\
+Eres un evaluador institucional especializado en la rúbrica oficial UPAO.
+Analiza si los errores identificados por el auditor son válidos según los criterios formales de la rúbrica.
+Basa tu argumento exclusivamente en los ítems de la rúbrica y las normas institucionales.
+
+CONTEXTO DEL DEBATE:
+- Sección evaluada: {seccion}
+- Errores bajo debate (ítems): {errores_rubrica}
+- Feedback del auditor: {feedback_auditor}
+- Observaciones metodológicas: {observaciones_metodologicas}
+
+EVALUACIONES PREVIAS EN ESTE PANEL:
+{historial_panel}
+
+Analiza cada ítem de error desde la perspectiva formal-institucional UPAO.
+¿Son válidos según la rúbrica? ¿Hay base normativa para cada uno?
+Emite tu postura por ítem, siendo preciso y basándote en la rúbrica."""
+
+_PROMPT_METODOLOGICO = """\
+Eres un metodólogo científico experto en investigación universitaria.
+Estás participando en un debate estructurado sobre errores detectados en una tesis.
+
+El evaluador formal ya emitió su postura. DEBES responder directamente a su argumento
+antes de agregar tu análisis propio. No puedes ignorar lo que dijo.
+
+CONTEXTO DEL DEBATE:
+- Sección evaluada: {seccion}
+- Errores bajo debate (ítems): {errores_rubrica}
+- Feedback del auditor: {feedback_auditor}
+- Observaciones metodológicas: {observaciones_metodologicas}
+
+POSTURA DEL EVALUADOR FORMAL (responde a esto):
+{historial_panel}
+
+Tu respuesta debe tener esta estructura obligatoria:
+
+REACCIÓN AL EVALUADOR FORMAL:
+[Para cada ítem que él analizó: ¿coincides o discrepas? Argumenta con rigor científico.
+Si la rúbrica dice que es error pero el método no lo respalda, dilo explícitamente.
+Si coincides, di por qué el método confirma su criterio formal.]
+
+MI ANÁLISIS METODOLÓGICO ADICIONAL:
+[Aspectos de rigor científico que el evaluador formal no consideró, si los hay.]
+
+Puedes discrepar de la rúbrica institucional si el método científico lo justifica.
+Sé directo: "discrepo con el evaluador formal en el ítem N porque..." o
+"confirmo la postura del evaluador formal en el ítem N porque..."\
+"""
+
+_PROMPT_CONTEXTUAL = """\
+Eres un evaluador contextual especializado en investigación de ingeniería
+en universidades peruanas. Estás participando en un debate estructurado.
+
+Los evaluadores formal y metodológico ya emitieron sus posturas y pueden haber
+discrepado entre sí. DEBES tomar posición respecto a ambos antes de dar la tuya.
+
+CONTEXTO DEL DEBATE:
+- Sección evaluada: {seccion}
+- Errores bajo debate (ítems): {errores_rubrica}
+- Feedback del auditor: {feedback_auditor}
+- Observaciones metodológicas: {observaciones_metodologicas}
+
+POSTURAS DE LOS EVALUADORES ANTERIORES (toma posición respecto a cada una):
+{historial_panel}
+
+Tu respuesta debe tener esta estructura obligatoria:
+
+REACCIÓN AL EVALUADOR FORMAL:
+[¿Su criterio de rúbrica aplica en el contexto real de UPAO? ¿O la rúbrica
+es más exigente que lo que la institución realmente valida en la práctica?]
+
+REACCIÓN AL EVALUADOR METODOLÓGICO:
+[¿Su análisis de rigor científico es apropiado para el nivel de pregrado
+en ingeniería en Perú? ¿O exige un estándar que no corresponde al contexto?]
+
+MI POSTURA CONTEXTUAL:
+[Tu veredicto final por ítem considerando ambas posturas anteriores y el
+contexto universitario peruano. Indica explícitamente si apoyas al formal,
+al metodológico, o tienes una posición distinta a ambos, y por qué.]
+
+Sé directo: "apoyo al evaluador formal sobre el ítem N", "discrepo con ambos
+evaluadores en el ítem N porque en UPAO..."\
+"""
+
+_PROMPT_SINTETIZADOR = """\
+Eres el árbitro final de un debate entre tres evaluadores especializados.
+Tu rol no es evaluar la tesis — es resolver el debate analizando los argumentos
+y contrargumentos que se dieron, y aplicar la regla de mayoría informada.
+
+CONTEXTO DEL DEBATE:
+- Sección evaluada: {seccion}
+- Ítems bajo debate: {errores_rubrica}
+
+TRANSCRIPCIÓN COMPLETA DEL DEBATE (los 3 evaluadores con sus reacciones mutuas):
+{historial_panel}
+
+Para cada ítem de error debes:
+1. Identificar si hubo acuerdo, desacuerdo o posición mixta entre los evaluadores
+2. Determinar qué argumento fue más sólido considerando el debate completo
+3. Aplicar la regla: ≥2/3 confirman → confirmado | ≥2/3 descartan → descartado | empate → matizado
+
+REGLAS:
+- Si el metodológico y el contextual refutaron al formal con argumentos sólidos → descartado
+  aunque el formal haya dicho que es error
+- Si hubo debate real y ninguno convenció a los otros → matizado
+- Si los tres coincidieron a pesar de partir de perspectivas distintas → confirmado con alta confianza
+- No cuentes votos mecánicamente — pesa la calidad del argumento, no solo la posición
+
+Emite el veredicto estructurado con justificación que explique qué argumentos
+del debate fueron determinantes para cada ítem.\
+"""
 
 
 def make_nodo_debate(llm_auditor: ChatGroq, llm_metodologico: ChatGroq):
-    """
-    Fábrica del Nodo Debate.
-    El Auditor argumenta sus hallazgos; el Metodólogo responde con veredicto estructurado.
-    """
-    prompt_auditor = ChatPromptTemplate.from_messages([
-        ("system", cargar_prompt("debate_auditor_prompt.md")),
-        ("human", "Defiende tus hallazgos en la ronda {ronda} del debate sobre '{seccion}'."),
-    ])
-    chain_auditor = prompt_auditor | llm_auditor
+    """Fábrica del nodo debate unificado con panel de 4 subagentes."""
 
-    llm_metod_estructurado = llm_metodologico.with_structured_output(ResolucionDebate)
-    prompt_metodologico = ChatPromptTemplate.from_messages([
-        ("system", cargar_prompt("debate_metodologico_prompt.md")),
-        ("human", "Emite tu resolución sobre los argumentos del Auditor en la ronda {ronda}."),
-    ])
-    chain_metodologico = prompt_metodologico | llm_metod_estructurado
+    # Chain 1: perspectiva formal (llm_auditor — precisión 0.1)
+    chain_formal = ChatPromptTemplate.from_messages([
+        ("system", _PROMPT_FORMAL),
+        ("human", "Emite tu análisis formal de los errores bajo debate."),
+    ]) | llm_auditor
+
+    # Chain 2: perspectiva metodológica (llm_metodologico — rigor 0.2)
+    chain_metodologica = ChatPromptTemplate.from_messages([
+        ("system", _PROMPT_METODOLOGICO),
+        ("human", "Emite tu análisis metodológico de los errores bajo debate."),
+    ]) | llm_metodologico
+
+    # Chain 3: perspectiva contextual (llm_metodologico — análisis 0.2)
+    chain_contextual = ChatPromptTemplate.from_messages([
+        ("system", _PROMPT_CONTEXTUAL),
+        ("human", "Emite tu análisis contextual de los errores bajo debate."),
+    ]) | llm_metodologico
+
+    # Chain 4: sintetizador (llm_metodologico con structured output)
+    chain_sintetizador = ChatPromptTemplate.from_messages([
+        ("system", _PROMPT_SINTETIZADOR),
+        ("human", "Emite el veredicto estructurado del panel."),
+    ]) | llm_metodologico.with_structured_output(VeredictoPanelDebate)
+
+    subagentes = [
+        ("perspectiva_formal",        chain_formal),
+        ("perspectiva_metodologica",  chain_metodologica),
+        ("perspectiva_contextual",    chain_contextual),
+        ("sintetizador_debate",       chain_sintetizador),
+    ]
 
     def nodo_debate(state: MentoriaState) -> dict:
-        ronda_actual = state.get("ronda_debate", 0) + 1
+        seccion    = state.get("seccion_objetivo", "")
+        errores:   List[ErrorRubrica] = state.get("errores_rubrica") or []
+        n_errores  = len(errores)
+
         logger.info(
-            f"[Debate] Ronda {ronda_actual}/{state.get('max_rondas_debate', 2)} | "
-            f"Sección: {state['seccion_objetivo']}"
+            f"[Debate] Iniciando panel de 4 subagentes | "
+            f"Sección: {seccion} | Errores activos: {n_errores}"
         )
 
-        texto_actual = state.get("texto_iterado") or state.get("contexto_recuperado", "")
+        if n_errores == 0:
+            logger.warning("[Debate] Sin errores activos — panel omitido")
+            return {
+                "debate_completado": True,
+                "debate_veredicto":  {"veredicto_general": "sin_errores", "justificacion": "No había errores activos"},
+                "debate_memory":     [],
+            }
 
-        # ── PASO 1: Auditor defiende sus hallazgos ────────────────────────────
-        arg = invocar_con_backoff(chain_auditor, {
-            "seccion":          state["seccion_objetivo"],
-            "texto_iterado":    texto_actual,
-            "errores_rubrica":  str(state.get("errores_rubrica", [])),
-            "feedback_auditor": state.get("feedback_auditor", ""),
-            "historial_debate": str(state.get("historial_debate", [])),
-            "ronda":            ronda_actual,
-        })
-        argumento_auditor = arg.content.strip()
-        logger.info(f"[Debate] Auditor argumentó ({len(argumento_auditor)} chars)")
+        # Contexto compartido para todos los subagentes
+        inputs_base = {
+            "seccion":                    seccion,
+            "errores_rubrica":            _formatear_errores(errores),
+            "feedback_auditor":           state.get("feedback_auditor", ""),
+            "observaciones_metodologicas": state.get("observaciones_metodologicas", ""),
+        }
 
-        # ── Pausa anti-rate-limit ─────────────────────────────────────────────
-        time.sleep(5)
+        # ── Panel con memoria compartida ──────────────────────────────────────
+        debate_memory: list = []   # lista de {"subagente": str, "contenido": str}
+        exitosos = 0
+        veredicto_raw: Optional[VeredictoPanelDebate] = None
 
-        # ── PASO 2: Metodólogo responde con resolución estructurada ──────────
-        resolucion: ResolucionDebate = invocar_con_backoff(chain_metodologico, {
-            "seccion":                       state["seccion_objetivo"],
-            "texto_iterado":                 texto_actual,
-            "argumento_auditor":             argumento_auditor,
-            "errores_rubrica":               str(state.get("errores_rubrica", [])),
-            "observaciones_metodologicas":   state.get("observaciones_metodologicas", ""),
-            "feedback_auditor":              state.get("feedback_auditor", ""),
-            "ronda":                         ronda_actual,
-        })
+        for nombre, chain in subagentes:
+            inputs = dict(inputs_base)
+            inputs["historial_panel"] = _formatear_historial(debate_memory) if debate_memory else \
+                "Eres el primer evaluador del panel — no hay evaluaciones anteriores que considerar."
 
-        # ── Actualizar errores_rubrica (eliminar los descartados) ─────────────
-        errores_actuales: List[ErrorRubrica] = state.get("errores_rubrica", [])
-        items_descartados = set(resolucion.items_descartados)
+            if exitosos > 0:
+                time.sleep(_PAUSA_ENTRE_SUBS)
+
+            try:
+                output = invocar_con_backoff(chain, inputs)
+
+                # Extraer contenido según el tipo de output
+                if hasattr(output, "content"):
+                    contenido = output.content.strip()
+                elif isinstance(output, VeredictoPanelDebate):
+                    contenido = (
+                        f"Veredicto — Confirmados: {output.items_confirmados} | "
+                        f"Descartados: {output.items_descartados} | "
+                        f"Matizados: {output.items_matizados}\n"
+                        f"Justificación: {output.justificacion}"
+                    )
+                    veredicto_raw = output
+                else:
+                    contenido = str(output).strip()
+
+                debate_memory.append({"subagente": nombre, "contenido": contenido})
+                exitosos += 1
+                logger.info(f"[Debate/{nombre}] ✓ completado")
+
+            except Exception as exc:
+                logger.warning(f"[Debate/{nombre}] Falló: {exc}")
+                debate_memory.append({
+                    "subagente": nombre,
+                    "contenido": f"[Error — no disponible: {exc}]",
+                })
+
+        logger.info(f"[Debate] Panel completo: {exitosos}/4 subagentes")
+
+        # ── Procesar veredicto del sintetizador ───────────────────────────────
+        if veredicto_raw is None:
+            # Fallback si el sintetizador falló: mantener todos los errores
+            logger.warning("[Debate] Sintetizador sin output — todos los errores se mantienen")
+            veredicto_dict = {
+                "items_confirmados": [e["item_numero"] for e in errores],
+                "items_descartados": [],
+                "items_matizados":   [],
+                "justificacion":     "El sintetizador no pudo emitir veredicto — errores conservados por precaución.",
+                "veredicto_general": "confirmado",
+            }
+            items_descartados_set: set = set()
+        else:
+            items_descartados_set = set(veredicto_raw.items_descartados)
+            veredicto_dict = {
+                "items_confirmados": list(veredicto_raw.items_confirmados),
+                "items_descartados": list(veredicto_raw.items_descartados),
+                "items_matizados":   list(veredicto_raw.items_matizados),
+                "justificacion":     veredicto_raw.justificacion,
+                "veredicto_general": veredicto_raw.veredicto_general,
+            }
+
+        # Actualizar errores_rubrica: eliminar los descartados
         errores_actualizados = [
-            e for e in errores_actuales
-            if e["item_numero"] not in items_descartados
+            e for e in errores
+            if e["item_numero"] not in items_descartados_set
         ]
 
+        veredicto_general = veredicto_dict.get("veredicto_general", "confirmado")
         logger.info(
-            f"[Debate] Ronda {ronda_actual}: "
-            f"{len(items_descartados)} descartados · "
-            f"{len(errores_actualizados)} errores pendientes"
+            f"[Debate] Panel completo: {exitosos}/4 | "
+            f"veredicto: {veredicto_general} | "
+            f"errores_activos: {len(errores_actualizados)} "
+            f"({len(items_descartados_set)} descartados)"
         )
 
-        # ── Registrar ronda en historial ──────────────────────────────────────
-        historial: List[RondaDebate] = list(state.get("historial_debate", []))
+        # Registrar en historial_debate (compatible con exportador)
+        historial = list(state.get("historial_debate") or [])
         historial.append({
-            "ronda":                  ronda_actual,
-            "argumento_auditor":      argumento_auditor,
-            "respuesta_metodologico": resolucion.posicion_metodologica,
-            "items_confirmados":      list(resolucion.items_confirmados),
-            "items_descartados":      list(resolucion.items_descartados),
+            "tipo":     "panel",
+            "panel":    debate_memory,
+            "veredicto": veredicto_dict,
         })
 
         return {
-            "ronda_debate":     ronda_actual,
-            "historial_debate": historial,
-            "errores_rubrica":  errores_actualizados,
+            "debate_memory":     debate_memory,
+            "debate_veredicto":  veredicto_dict,
+            "debate_completado": True,
+            "errores_rubrica":   errores_actualizados,
+            "historial_debate":  historial,
         }
 
     return nodo_debate
+
+
+# ── Helpers internos ──────────────────────────────────────────────────────────
+
+def _formatear_errores(errores: list) -> str:
+    if not errores:
+        return "(sin errores activos)"
+    lineas = []
+    for e in errores:
+        if isinstance(e, dict):
+            lineas.append(
+                f"  - Ítem {e.get('item_numero', '?')} "
+                f"(puntaje={e.get('puntaje_actual', '?')}): {e.get('descripcion', '')}"
+            )
+        else:
+            lineas.append(f"  - {e}")
+    return "\n".join(lineas)
+
+
+def _formatear_historial(debate_memory: list) -> str:
+    partes = []
+    for entrada in debate_memory:
+        nombre = entrada.get("subagente", "?")
+        contenido = entrada.get("contenido", "")
+        partes.append(f"[{nombre}]\n{contenido}")
+    return "\n\n".join(partes)

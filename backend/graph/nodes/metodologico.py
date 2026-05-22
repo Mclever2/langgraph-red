@@ -1,73 +1,180 @@
 """
-Agente Metodólogo — Rigor científico y coherencia cruzada entre secciones.
+Nodo Metodólogo — Panel de 2 subagentes especializados con LoRA + MCP.
 
-CAMBIO 4: usa ContextLoader para obtener instrucciones institucionales dinámicas.
-Fallback: si ContextLoader falla, usa el prompt UPAO del archivo metodologico_prompt.md.
+¿POR QUÉ 2 SUBAGENTES Y NO MÁS?
+  El metodólogo tiene exactamente 2 responsabilidades distintas:
+    1. Validar el rigor científico (diseño, método, operacionalización)
+    2. Verificar la coherencia transversal (consistencia entre secciones)
+  Añadir un 3ro solaparía con uno de estos — no hay una 3ra dimensión genuina.
+  2 es el número correcto para este agente.
 
-Corre en PARALELO con el Auditor (fork-join).
+SUBAGENTES:
+  1. metodologo_rigor (temp 0.10)
+     LoRA: especialista en validación científica
+     MCP:  Biblioteca (libros Hernández Sampieri, Creswell, etc.) + Drive institucional
+     → ¿El diseño de investigación es correcto? ¿Los métodos son apropiados?
+
+  2. metodologo_coherencia (temp 0.20)
+     LoRA: especialista en coherencia cruzada de secciones
+     MCP:  Tesis (secciones relacionadas del documento)
+     → Lee lo que dijo Sub1 + verifica consistencia entre capítulos
+
+DEBATE CON MEMORIA COMPARTIDA:
+  Sub2 (coherencia) recibe el análisis de Sub1 (rigor) via historial_panel
+  y puede confirmar, matizar o complementar desde su perspectiva.
+  El resultado final es la CONCATENACIÓN de ambos análisis —
+  no hay score numérico por ítem, así que no aplica consenso matemático.
 """
 
-import time
 import logging
+import os
+import time
+
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 
 from ..state import MentoriaState
 from ._utils import cargar_prompt, invocar_con_backoff
+from ._rag_planner import obtener_contexto_dinamico
+from ._panel_utils import ejecutar_panel, consolidar_panel_texto, ResultadoSubagente
 
 logger = logging.getLogger(__name__)
 
 
 def make_nodo_metodologico(llm: ChatGroq):
-    plantilla_base = cargar_prompt("metodologico_prompt.md")
-    prompt_base = ChatPromptTemplate.from_messages([
-        ("system", plantilla_base),
-        ("human", "Evalúa el rigor metodológico y la coherencia cruzada del texto para la sección '{seccion}'."),
-    ])
-    chain_base = prompt_base | llm
+    """
+    Construye el Nodo Metodólogo con panel de 2 subagentes (LoRA + MCP).
+    """
+    prompt_base = cargar_prompt("metodologico_prompt.md")
+    model_name  = getattr(llm, "model_name", "llama-3.3-70b-versatile")
+    api_key_base = (
+        os.getenv("GROQ_KEY_METODOLOGICO") or os.getenv("GROQ_API_KEY", "")
+    )
 
     def nodo_metodologico(state: MentoriaState) -> dict:
-        logger.info("[Metodólogo] Pausa 5s anti-rate-limit...")
-        time.sleep(5)
+        logger.info("[Metodólogo] Iniciando panel de 2 subagentes (LoRA + MCP)...")
+        time.sleep(5)  # anti-rate-limit inicial (el metodólogo siempre espera más)
 
-        seccion = state["seccion_objetivo"]
-        n_iter  = state.get("numero_iteracion", 0)
+        seccion     = state["seccion_objetivo"]
+        n_iter      = state.get("numero_iteracion", 0)
         universidad = state.get("universidad", "upao")
         programa    = state.get("programa", "ingeniería de sistemas")
 
         texto_a_evaluar = state.get("texto_iterado") or state.get("contexto_recuperado", "")
         fuente_texto    = "mejorado" if state.get("texto_iterado") else "original del PDF"
-        logger.info(f"[Metodólogo] Ciclo {n_iter} | Texto: {fuente_texto} | Sección: {seccion}")
 
-        # Intentar enriquecer el system prompt con instrucciones institucionales
-        chain = chain_base
-        try:
-            from context.context_loader import ContextLoader
-            loader = ContextLoader()
-            contexto = loader.get(universidad=universidad, programa=programa)
-            instrucciones = loader.construir_system_prompt_metodologo(contexto)
-            prompt_enriquecido = ChatPromptTemplate.from_messages([
-                ("system", instrucciones + "\n\n---\n\n" + plantilla_base),
-                ("human", "Evalúa el rigor metodológico y la coherencia cruzada del texto para la sección '{seccion}'."),
-            ])
-            chain = prompt_enriquecido | llm
-            logger.info(f"[Metodólogo] ContextLoader OK — {contexto.get('universidad', '?')}")
-        except Exception as exc:
-            logger.debug(f"[Metodólogo] ContextLoader no disponible ({exc}), usando prompt base")
+        logger.info(
+            f"[Metodólogo] Ciclo {n_iter} | {seccion} | {fuente_texto} | "
+            f"Universidad: {universidad}"
+        )
 
-        respuesta = invocar_con_backoff(chain, {
+        # ── Enriquecer contexto: el metodólogo decide qué secciones necesita ─
+        # El subagente de coherencia cruza secciones — el planner le da exactamente
+        # lo que necesita para detectar contradicciones entre capítulos.
+        logger.info("[Metodólogo] Planificando contexto adicional con RAG dinámico…")
+        contexto_dinamico = obtener_contexto_dinamico(
+            llm          = llm,
+            seccion      = seccion,
+            texto_snippet= texto_a_evaluar[:500],
+            rol          = "metodólogo experto en coherencia cruzada de tesis universitarias",
+        )
+
+        # ── Inputs base ───────────────────────────────────────────────────────
+        inputs_base = {
             "seccion":                  seccion,
             "texto_iterado":            texto_a_evaluar,
-            "contexto_dependencias":    state.get("contexto_dependencias") or "Sin contexto de secciones relacionadas.",
+            "contexto_dependencias":    contexto_dinamico or state.get("contexto_dependencias") or "Sin contexto de secciones relacionadas.",
             "contexto_recuperado":      state.get("contexto_recuperado", ""),
             "contexto_teorico":         state.get("contexto_teorico") or "",
             "numero_iteracion":         n_iter,
-        })
+            "universidad":              universidad,
+            "programa":                 programa,
+            # Placeholders MCP
+            "rubrica_institucional_drive":       "",
+            "contexto_biblioteca_disponible":    "",
+            "contexto_secciones_relacionadas":   "",
+        }
 
-        logger.info(f"[Metodólogo] Evaluación completada ({len(respuesta.content)} chars)")
+        # ── Cargar LoRAs para esta universidad/programa ───────────────────────
+        from backend.lora.lora_configs import get_loras_para_agente, TIPO_METODOLOGO
+        from backend.mcp.tools import crear_fetch_para_lora
+
+        loras = get_loras_para_agente(TIPO_METODOLOGO, universidad, programa)
+
+        # ── Construir sub_items ───────────────────────────────────────────────
+        sub_items = []
+        api_keys = _obtener_api_keys_metodologo()
+
+        for idx, lora in enumerate(loras):
+            sub_llm = ChatGroq(
+                api_key=api_keys[idx % len(api_keys)],
+                model=model_name,
+                temperature=lora.temperatura,
+                max_retries=2,
+            )
+
+            system_prompt = lora.system_prompt_completo(prompt_base)
+
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", system_prompt),
+                ("human", (
+                    "Evalúa el rigor metodológico de la sección '{seccion}' "
+                    "(iteración {numero_iteracion}).\n\n"
+                    "**PERSPECTIVAS DE EVALUADORES ANTERIORES DEL PANEL:**\n"
+                    "{historial_panel}\n\n"
+                    "{contexto_biblioteca_disponible}\n\n"
+                    "{contexto_secciones_relacionadas}"
+                )),
+            ])
+            chain = prompt | sub_llm
+
+            mcp_fn = crear_fetch_para_lora(lora.fuentes_datos, lora.drive_folder_id)
+            sub_items.append((chain, lora.id, mcp_fn))
+
+        # ── Ejecutar panel ────────────────────────────────────────────────────
+        resultados = ejecutar_panel(sub_items, inputs_base, logger_prefix="Metodólogo")
+
+        # ── Fallback: si el panel falla, usar LLM base ────────────────────────
+        if not any(r.exitoso for r in resultados):
+            logger.warning("[Metodólogo] Panel falló — usando LLM base como fallback")
+            prompt_fb = ChatPromptTemplate.from_messages([
+                ("system", prompt_base),
+                ("human", "Evalúa el rigor metodológico de la sección '{seccion}'."),
+            ])
+            chain_fb = prompt_fb | llm
+            output_fb = invocar_con_backoff(chain_fb, inputs_base)
+            resultados = [ResultadoSubagente(lora_id="fallback", output=output_fb)]
+
+        # ── Consolidar: concatenar análisis de ambos subagentes ───────────────
+        # El metodólogo no produce score numérico → concatenamos perspectivas
+        observaciones = consolidar_panel_texto(
+            resultados,
+            separador="\n\n---\n\n",
+        )
+
+        loras_usadas = [lora.id for lora in loras]
+
+        logger.info(
+            f"[Metodólogo] Evaluación completa ({len(observaciones)} chars) | "
+            f"LoRAs: {loras_usadas}"
+        )
+
         return {
-            "observaciones_metodologicas": respuesta.content.strip(),
+            "observaciones_metodologicas": observaciones,
             "iter_metodologica":           n_iter + 1,
+            "loras_activas":               loras_usadas,
         }
 
     return nodo_metodologico
+
+
+def _obtener_api_keys_metodologo() -> list[str]:
+    """Retorna lista de API keys disponibles para los subagentes del metodólogo."""
+    base = os.getenv("GROQ_KEY_METODOLOGICO") or os.getenv("GROQ_API_KEY", "")
+    # Intentar obtener keys rotativas del Config global
+    try:
+        from config import Config
+        keys = [Config.get_next_groq_key(i) for i in range(2)]
+        return [k for k in keys if k] or [base]
+    except Exception:
+        return [base, base]

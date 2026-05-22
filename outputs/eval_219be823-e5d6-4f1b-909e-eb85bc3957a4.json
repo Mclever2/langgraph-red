@@ -1,0 +1,29 @@
+{
+  "run_id": "219be823-e5d6-4f1b-909e-eb85bc3957a4",
+  "arquitectura": "langgraph-hub-spoke",
+  "universidad": "upao",
+  "metricas": {
+    "rouge1_f": 0.3654,
+    "rouge2_f": 0.2415,
+    "rougeL_f": 0.2527,
+    "bleu_score": 0.0239,
+    "similitud_coseno": 0.8334,
+    "interpretacion": "mejora moderada",
+    "kappa": 1.0,
+    "nota": "acuerdo total entre agentes — sin varianza suficiente para Kappa robusto",
+    "turnos_analizados": 2,
+    "detalle": {
+      "etiquetas_auditor": [
+        0,
+        0
+      ],
+      "etiquetas_metodologo": [
+        0,
+        0
+      ]
+    },
+    "gain_score": 0.5,
+    "puntaje_inicial": 1.0,
+    "puntaje_final": 2.0
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "run_id": "test123",
+  "arquitectura": "langgraph-hub-spoke",
+  "universidad": "upao",
+  "metricas": {
+    "rouge1_f": 0.8696,
+    "rouge2_f": 0.7619,
+    "rougeL_f": 0.8696,
+    "bleu_score": 0.5915,
+    "similitud_coseno": 0.7765,
+    "interpretacion": "mejora alta",
+    "kappa": null,
+    "nota": "debate insuficiente — se necesitan al menos 2 turnos",
+    "gain_score": 1.0,
+    "puntaje_inicial": 2.0,
+    "puntaje_final": 4.0
+  }
+}
