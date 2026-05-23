@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 _RE_LINEA_TOC = re.compile(r'\.{4,}\s*\d{1,4}\s*$')
 # Patrón para parsear entrada de TOC: "3.3 Título de sección .... 22"
 _RE_ENTRADA_TOC = re.compile(
-    r'^(\d[\d\.\-–]*\.?\s+[A-ZÁÉÍÓÚÜÑ][^\.]{3,}?)\s*\.{3,}\s*(\d{1,4})\s*$',
+    r'^(\d[\d\.\-–]*\.?\s*[A-ZÁÉÍÓÚÜÑ][^\.]{3,}?)\s*\.{3,}\s*(\d{1,4})\s*$',
     re.IGNORECASE,
 )
 # Si más del 28 % de las líneas de una página tienen patrón TOC, se considera índice

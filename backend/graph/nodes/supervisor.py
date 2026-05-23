@@ -37,15 +37,16 @@ def _fallback_routing(state: MentoriaState) -> str:
     Fallback determinista SOLO si el LLM falla o devuelve valor inválido.
     Este es el último recurso, no el camino normal.
     """
-    n_iter    = state.get("numero_iteracion", 0)
-    max_iter  = state.get("max_iteraciones", 3)
-    n_errores = len(state.get("errores_rubrica") or [])
-    pasos     = state.get("pasos_ejecutados", 0)
-    max_pasos = state.get("max_pasos_red", 40)
+    n_iter        = state.get("numero_iteracion", 0)
+    max_iter      = state.get("max_iteraciones", 3)
+    n_errores     = len(state.get("errores_rubrica") or [])
+    pasos         = state.get("pasos_ejecutados", 0)
+    max_pasos     = state.get("max_pasos_red", 40)
+    iter_auditada = state.get("iter_auditada", 0)
 
     if pasos >= max_pasos:
         return "fin"
-    if not state.get("iter_auditada"):
+    if not iter_auditada:
         return "auditor"
     if not state.get("iter_metodologica"):
         return "metodologico"
@@ -53,10 +54,17 @@ def _fallback_routing(state: MentoriaState) -> str:
         return "consenso"
     if not state.get("iter_disenso"):
         return "disenso"
-    if n_errores > 0 and not state.get("debate_completado", False):
+    # El debate solo se vuelve a correr si aún quedan iteraciones por hacer.
+    # Cuando n_iter >= max_iter solo necesitamos la auditoría final del texto.
+    if n_errores > 0 and not state.get("debate_completado", False) and n_iter < max_iter:
         return "debate"
     if state.get("texto_iterado") is None or (n_errores > 0 and n_iter < max_iter):
         return "redactor"
+    # Tras la reescritura del Redactor, el Auditor debe evaluar el texto mejorado
+    # antes de poder terminar (iter_auditada <= n_iter significa que el Auditor
+    # aún no evaluó la última versión del texto).
+    if state.get("texto_iterado") and iter_auditada <= n_iter:
+        return "auditor"
     return "fin"
 
 
@@ -80,8 +88,12 @@ def _validar_decision_semantica(siguiente: str, state: MentoriaState) -> str | N
     consenso_ok     = iter_consenso > n_iter
     disenso_ok      = iter_disenso > n_iter
 
-    # Ciclo completo: ya se generó texto y se alcanzó el máximo de iteraciones
+    # Ciclo completo: ya se generó texto y se alcanzó el máximo de iteraciones.
+    # Excepción: permitir UNA pasada final del Auditor sobre el texto reescrito
+    # (iter_auditada <= n_iter significa que el Auditor aún no evaluó esta versión).
     if n_iter >= max_iter and state.get("texto_iterado") and siguiente != "fin":
+        if siguiente == "auditor" and not auditor_ok:
+            return None  # auditoría final del texto mejorado — válida
         return f"ciclo completo (iter {n_iter}/{max_iter}) con texto generado — debe ser fin"
 
     if siguiente == "fin":
@@ -167,17 +179,18 @@ def make_nodo_supervisor(llm: ChatOpenAI):
             }
 
         # ── Terminación determinista: ciclo completo sin llamar al LLM ────────
-        # Cuando numero_iteracion >= max_iteraciones y ya existe texto_iterado,
-        # el ciclo terminó. El auditor_ok check (iter_auditada > n_iter) da False
-        # porque el redactor ya incrementó numero_iteracion, causando bucle infinito.
-        # Esta guarda corta antes del LLM y evita esas llamadas innecesarias.
-        if n_iter >= max_iter and state.get("texto_iterado"):
+        # Condición: se alcanzó el máximo de iteraciones, existe texto mejorado
+        # Y el Auditor ya evaluó esa última versión (auditor_ok=True).
+        # Sin la comprobación de auditor_ok, el Redactor incrementaría
+        # numero_iteracion y el Supervisor terminaría sin que el Auditor
+        # haya visto el texto mejorado.
+        if n_iter >= max_iter and state.get("texto_iterado") and auditor_ok:
             logger.info(
-                f"[Supervisor] Ciclo completo: iter {n_iter}/{max_iter} con texto generado → fin"
+                f"[Supervisor] Ciclo completo: iter {n_iter}/{max_iter} con texto generado y auditado → fin"
             )
             return {
                 "siguiente_nodo":           "fin",
-                "instrucciones_supervisor": f"Ciclo {n_iter}/{max_iter} completado con texto mejorado.",
+                "instrucciones_supervisor": f"Ciclo {n_iter}/{max_iter} completado con texto mejorado y auditado.",
                 "plan_supervisor":          "[FIN] Ciclo completado",
                 "pasos_ejecutados":         pasos + 1,
             }

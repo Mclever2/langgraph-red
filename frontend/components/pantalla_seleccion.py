@@ -8,7 +8,7 @@ from backend.config import (
     SECCIONES_TESIS, SECCION_ITEMS_MAP, DEPENDENCIAS_SECCIONES,
 )
 from backend.rag import (
-    recuperar_contexto, recuperar_vista_general,
+    recuperar_contexto, recuperar_contexto_cruzado, recuperar_vista_general,
     recuperar_contexto_teorico, listar_libros,
 )
 from backend.rag.rag_context import set_vector_store
@@ -130,9 +130,9 @@ def render_pantalla_seleccion() -> None:
 
     st.divider()
 
-    # Flujo por iteración: Supervisor×8 + Aud + Met + Con + Dis + Debate(4 subs) + Red
-    # El debate es un nodo único (panel interno de 4 subagentes), no múltiples nodos.
-    max_pasos = 8 * max_iter * 2 + 4
+    # Flujo por iteración: Supervisor×8 + Aud + Met + Con + Dis + Debate + Red
+    # + 1 auditoría final post-reescritura + 2 supervisores extra (margen)
+    max_pasos = 8 * max_iter * 2 + 6
 
     tiempo_est_min = 7 * max_iter * 6 // 60
     tiempo_est_max = 7 * max_iter * 10 // 60
@@ -157,7 +157,7 @@ def render_pantalla_seleccion() -> None:
 
     with st.spinner(
         "Recuperando panorama del documento…" if es_vista_general
-        else "Recuperando contexto de la sección seleccionada…"
+        else "Recuperando contexto principal y contexto cruzado de otras secciones…"
     ):
         if es_vista_general:
             # Vista general: un fragmento representativo de cada capítulo
@@ -168,10 +168,11 @@ def render_pantalla_seleccion() -> None:
             # Recuperación normal: sección principal + subsecciones
             contexto_tesis = recuperar_contexto(vs, seccion_elegida)
             seccion_para_estado  = seccion_elegida
-            # El contexto cruzado ya no se pre-fetcha aquí.
-            # Auditor, Metodólogo y Redactor lo recuperan dinámicamente con RAG
-            # guiado por LLM — cada agente decide qué secciones necesita consultar.
-            contexto_dependencias = ""
+            # Contexto cruzado: fragmentos de otras secciones estructuralmente
+            # relevantes (objetivos, hipótesis, variables, metodología…).
+            # Se pre-fetcha aquí para que todos los agentes lo tengan disponible
+            # y para mostrarlo en la pestaña "Contexto cruzado" de la UI.
+            contexto_dependencias = recuperar_contexto_cruzado(vs, seccion_elegida)
 
         contexto_teoria = recuperar_contexto_teorico(biblioteca, seccion_elegida if not es_vista_general else "metodología investigación")
 
@@ -188,7 +189,11 @@ def render_pantalla_seleccion() -> None:
         "Panorama del documento recuperado" if es_vista_general
         else "Contexto principal recuperado (sección + subsecciones)"
     )
-    col_i2.info("Contexto cruzado: cada agente lo recupera dinámicamente según lo que necesite")
+    if es_vista_general:
+        col_i2.info("Modo vista general: un fragmento representativo por capítulo")
+    else:
+        n_cruzado = len([p for p in contexto_dependencias.split("---") if p.strip()]) if contexto_dependencias else 0
+        col_i2.info(f"Contexto cruzado recuperado: {n_cruzado} sección(es) relacionadas")
 
     # ── Estado inicial para el grafo ──────────────────────────────────────────
     estado_inicial = {

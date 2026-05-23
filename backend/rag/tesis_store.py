@@ -36,6 +36,58 @@ def _extraer_prefijo(nombre: str) -> str:
     return m.group(1).rstrip('.') if m else ""
 
 
+def _extraer_prefijos_rango(seccion: str) -> list[str]:
+    """
+    Extrae todos los prefijos de una sección con rango explícito.
+    "4.1–4.3 Tipo, Método y Diseño" → ["4.1", "4.2", "4.3"]
+    "3.1–3.2 Hipótesis"             → ["3.1", "3.2"]
+    "1.2 Objetivos"                 → ["1.2"]
+    "III. Referencias"              → []
+    """
+    m = re.match(r'^(\d[\d\.]*)[\s]*[–\-][\s]*(\d[\d\.]*)', seccion.strip())
+    if not m:
+        p = _extraer_prefijo(seccion)
+        return [p] if p else []
+    ini = m.group(1).rstrip('.')
+    fin = m.group(2).rstrip('.')
+    p_ini = [int(x) for x in ini.split('.')]
+    p_fin = [int(x) for x in fin.split('.')]
+    if len(p_ini) != len(p_fin) or not p_ini:
+        return [ini]
+    if p_ini[:-1] != p_fin[:-1]:
+        return [ini]
+    padre = '.'.join(str(x) for x in p_ini[:-1])
+    return [
+        f"{padre}.{i}" if padre else str(i)
+        for i in range(p_ini[-1], p_fin[-1] + 1)
+    ]
+
+
+def _prefijo_ancestro_comun(prefijos: list[str]) -> str:
+    """
+    Halla el prefijo numérico ancestro común más largo de una lista.
+    ["2.1.1", "2.1.2"] → "2.1"
+    ["3.1",   "3.2"]   → "3"
+    ["2",     "4"]     → ""  (capítulos distintos, no se amalgaman)
+    Sube máximo 2 niveles para no sobrepasar el contexto relevante.
+    """
+    unicos = list({p for p in prefijos if p})
+    if not unicos:
+        return ""
+    if len(unicos) == 1:
+        return unicos[0]
+    partes = [p.split('.') for p in unicos]
+    prof_max = max(len(p) for p in partes)
+    prof_min = min(len(p) for p in partes)
+    for nivel in range(prof_min, 0, -1):
+        candidatos = {'.'.join(p[:nivel]) for p in partes}
+        if len(candidatos) == 1:
+            if prof_max - nivel <= 2:
+                return candidatos.pop()
+            return ""
+    return ""
+
+
 def _es_subseccion(nombre: str, prefijo_padre: str) -> bool:
     """True si la sección pertenece al prefijo padre o es una subsección de él."""
     if not prefijo_padre:
@@ -50,8 +102,45 @@ K_RESULTADOS  = 4        # solo para fallback sin metadata de sección
 K_INICIAL     = 6        # cuántos resultados top usar para detectar la sección dominante
 MAX_FRAGMENTOS_SECCION = 20  # límite de fragmentos por sección (~12 000 chars máx)
 
+# Umbral mínimo de caracteres para considerar que un chunk tiene contenido real.
+# Por debajo de este valor, el chunk es solo un encabezado/título y no aporta
+# información útil — incluirlo confunde a los agentes (ven la sección pero vacía).
+_MIN_CHARS_CHUNK = 80
+
 
 # ── Agrupación por TOC ────────────────────────────────────────────────────────
+
+def _encontrar_encabezado_en_texto(texto: str, nombre_seccion: str) -> int:
+    """
+    Localiza el encabezado de una sección en el texto de contenido de una página.
+
+    Returns posición de inicio (0-indexed), o -1 si no se encuentra.
+    Estrategia en cascada: búsqueda exacta → normalización de espacios → prefijo numérico al inicio de línea.
+    """
+    # 1. Búsqueda exacta
+    idx = texto.find(nombre_seccion)
+    if idx >= 0:
+        return idx
+
+    # 2. Normalizar espacios y buscar de nuevo
+    nombre_norm = re.sub(r'\s+', ' ', nombre_seccion).strip()
+    idx = texto.find(nombre_norm)
+    if idx >= 0:
+        return idx
+
+    # 3. Buscar por prefijo numérico al inicio de una línea (ej. "1.4.2")
+    m_pref = re.match(r'^(\d[\d\.]*)', nombre_norm)
+    if m_pref:
+        prefix = m_pref.group(1).rstrip('.')
+        # El prefijo debe aparecer al inicio del texto o después de un salto de línea
+        pattern = r'(?:(?<=\n)|^)' + re.escape(prefix) + r'[.\s]'
+        m = re.search(pattern, texto)
+        if m:
+            pos = m.start()
+            return pos + (1 if pos < len(texto) and texto[pos] == '\n' else 0)
+
+    return -1
+
 
 def _agrupar_por_toc(
     paginas: list[tuple[int, str]],
@@ -60,10 +149,14 @@ def _agrupar_por_toc(
     """
     Agrupa las páginas de contenido en secciones según el TOC.
 
-    Algoritmo "last-start-wins": cada página se asigna a la sección cuyo
-    número de inicio es el mayor que sea <= número de esa página. Esto garantiza
-    que TODAS las páginas queden asignadas a exactamente una sección, incluso
-    cuando varias secciones comparten la misma página de inicio.
+    Algoritmo mejorado:
+      - Páginas de continuación (ninguna sección empieza en ellas): texto completo
+        a la sección que estaba en curso.
+      - Páginas donde empieza una o más secciones nuevas: se detectan las posiciones
+        de cada encabezado en el texto con _encontrar_encabezado_en_texto, se ordena
+        por posición y se reparte el texto en segmentos. El texto anterior al primer
+        encabezado va a la sección anterior. Si no se detecta ningún encabezado,
+        todo el texto va a la última sección que empieza en esa página (fallback).
 
     Returns:
         Lista de (nombre_seccion, texto_seccion, pagina_inicio), solo secciones
@@ -74,22 +167,58 @@ def _agrupar_por_toc(
         texto_total = "\n\n".join(t for _, t in sorted(paginas))
         return [("Documento completo", texto_total, 1)]
 
-    # Ordenar secciones por página de inicio (ascendente)
     secciones_ord = sorted(estructura_toc.items(), key=lambda x: x[1])
-
-    # Acumular texto por sección
     acumulado: dict[str, list[str]] = {nombre: [] for nombre, _ in secciones_ord}
     paginas_asignadas = 0
 
-    for pag, texto in sorted(paginas):
-        # Encontrar la sección más reciente cuyo inicio sea <= pag
-        seccion_actual: str | None = None
-        for nombre, pag_inicio in reversed(secciones_ord):
-            if pag_inicio <= pag:
-                seccion_actual = nombre
-                break
-        if seccion_actual is not None:
-            acumulado[seccion_actual].append(texto)
+    for pag, texto_pag in sorted(paginas):
+        # Secciones que empiezan exactamente en esta página
+        secciones_en_pag = [n for n, p in secciones_ord if p == pag]
+
+        if not secciones_en_pag:
+            # Página de continuación: asignar a la sección en curso (última con inicio ≤ pag)
+            running: str | None = None
+            for nombre, pag_inicio in reversed(secciones_ord):
+                if pag_inicio <= pag:
+                    running = nombre
+                    break
+            if running is not None:
+                acumulado[running].append(texto_pag)
+                paginas_asignadas += 1
+        else:
+            # Una o más secciones nuevas empiezan aquí.
+            # La sección anterior a esta página recibe el texto previo al primer encabezado.
+            prev: str | None = None
+            for nombre, pag_inicio in reversed(secciones_ord):
+                if pag_inicio < pag:
+                    prev = nombre
+                    break
+
+            # Detectar posición de cada encabezado en el texto de la página
+            posiciones: dict[str, int] = {}
+            for nombre in secciones_en_pag:
+                pos = _encontrar_encabezado_en_texto(texto_pag, nombre)
+                if pos >= 0:
+                    posiciones[nombre] = pos
+
+            if posiciones:
+                secciones_pos = sorted(posiciones.items(), key=lambda x: x[1])
+                # Texto antes del primer encabezado → sección anterior
+                primera_pos = secciones_pos[0][1]
+                if primera_pos > 0 and prev is not None:
+                    previo = texto_pag[:primera_pos].strip()
+                    if previo:
+                        acumulado[prev].append(previo)
+                # Repartir segmentos entre las secciones encontradas
+                for i, (nombre, pos) in enumerate(secciones_pos):
+                    sig = secciones_pos[i + 1][1] if i + 1 < len(secciones_pos) else len(texto_pag)
+                    frag = texto_pag[pos:sig].strip()
+                    if frag:
+                        acumulado[nombre].append(frag)
+            else:
+                # Fallback: no se encontraron encabezados → última sección en la página
+                acumulado[secciones_en_pag[-1]].append(texto_pag)
+
             paginas_asignadas += 1
 
     if paginas_asignadas == 0:
@@ -102,9 +231,9 @@ def _agrupar_por_toc(
 
     grupos: list[tuple[str, str, int]] = []
     for nombre, pag_inicio in secciones_ord:
-        texto = "\n\n".join(acumulado[nombre])
-        if texto.strip():
-            grupos.append((nombre, texto.strip(), pag_inicio))
+        texto_sec = "\n\n".join(acumulado[nombre])
+        if texto_sec.strip():
+            grupos.append((nombre, texto_sec.strip(), pag_inicio))
 
     logger.info(
         f"TOC: {len(grupos)} secciones con contenido "
@@ -126,6 +255,14 @@ def _secciones_a_documentos(
     """
     docs: list[Document] = []
     for nombre, texto, pag_inicio in grupos:
+        texto_limpio = texto.strip()
+        if len(texto_limpio) < _MIN_CHARS_CHUNK:
+            # Solo contiene el encabezado de sección sin cuerpo — no aporta a RAG
+            logger.debug(
+                f"Sección '{nombre}' descartada del índice ({len(texto_limpio)} chars — solo título)"
+            )
+            continue
+
         metadata = {
             "source":        collection_name,
             "tipo":          "proyecto_tesis",
@@ -133,10 +270,10 @@ def _secciones_a_documentos(
             "pagina_inicio": pag_inicio,
         }
 
-        if len(texto) <= CHUNK_SIZE:
-            docs.append(Document(page_content=texto, metadata=metadata))
+        if len(texto_limpio) <= CHUNK_SIZE:
+            docs.append(Document(page_content=texto_limpio, metadata=metadata))
         else:
-            chunks = splitter.create_documents([texto], metadatas=[metadata])
+            chunks = splitter.create_documents([texto_limpio], metadatas=[metadata])
             docs.extend(chunks)
 
     return docs
@@ -271,24 +408,24 @@ def recuperar_contexto(
     """
     Recupera el contexto del PDF del estudiante para la sección indicada.
 
-    Estrategia de recuperación en dos pasos:
-      1. Obtiene los K_INICIAL fragmentos más similares a la query para
-         identificar cuál sección del TOC es la dominante (via metadata).
-      2. Devuelve TODOS los fragmentos de esa sección (hasta MAX_FRAGMENTOS_SECCION),
-         ordenados por relevancia semántica.
-
-    Si los fragmentos no tienen metadata de sección (chunking antiguo), cae
-    back al top-k clásico.
+    Estrategia:
+      1. Ranking semántico de todos los fragmentos del store.
+      2. Determina los prefijos de sección que corresponden a la query:
+         a. Extrae prefijos del nombre de config (maneja rangos "4.1–4.3").
+         b. Valida que esos prefijos coincidan semánticamente con el top-K.
+            Si coinciden → usa los prefijos del config (numeración igual en PDF y config).
+            Si no coinciden → el PDF usa otra numeración; busca el ancestro común
+            de las secciones del top-K para recuperar el árbol correcto.
+      3. Devuelve hasta MAX_FRAGMENTOS_SECCION fragmentos del árbol detectado,
+         ordenados por similitud semántica.
     """
     from collections import Counter
 
     query = _buscar_query_semantica(seccion)
-
     logger.info(f"RAG tesis → '{seccion}' | query: '{query[:55]}…'")
 
     try:
         n_total = vector_store._collection.count()
-        # Paso 1: rankeamos todos los fragmentos por similitud a la query
         todos_docs = vector_store.similarity_search(query, k=n_total)
     except Exception as exc:
         logger.error(f"Error en similarity_search tesis: {exc}")
@@ -300,51 +437,61 @@ def recuperar_contexto(
             "El estudiante puede no haber redactado aún esta sección."
         )
 
-    # Paso 2: detectar sección dominante en los primeros K_INICIAL resultados
     top_meta = [d.metadata.get("seccion") for d in todos_docs[:K_INICIAL]
                 if d.metadata.get("seccion")]
 
-    if top_meta:
-        seccion_dominante = Counter(top_meta).most_common(1)[0][0]
-
-        # Paso 3: recuperación jerárquica.
-        # Si la sección query tiene prefijo numérico (ej. "2" para "2. MARCO TEÓRICO"),
-        # primero intentamos seleccionar directamente por ese prefijo en el store
-        # (recupera la sección Y todas sus subsecciones).
-        # Si no hay coincidencias directas (query UPAO que no existe en el PDF),
-        # recaemos en el prefijo de la sección dominante detectada.
-        prefijo_query = _extraer_prefijo(seccion)
-        if prefijo_query:
-            docs_directos = [d for d in todos_docs
-                             if _es_subseccion(d.metadata.get("seccion", ""), prefijo_query)]
-        else:
-            docs_directos = []
-
-        if docs_directos:
-            # Coincidencia directa: la sección del PDF existe en el store
-            docs = docs_directos[:MAX_FRAGMENTOS_SECCION]
-            logger.info(
-                f"RAG tesis: prefijo directo '{prefijo_query}' → "
-                f"{len(docs)} fragmentos devueltos (sección + subsecciones)"
-            )
-        else:
-            # Fallback: usar sección dominante + expansión jerárquica hacia abajo
-            prefijo_dom = _extraer_prefijo(seccion_dominante)
-            if prefijo_dom:
-                docs = [d for d in todos_docs
-                        if _es_subseccion(d.metadata.get("seccion", ""), prefijo_dom)]
-            else:
-                docs = [d for d in todos_docs
-                        if d.metadata.get("seccion") == seccion_dominante]
-            docs = docs[:MAX_FRAGMENTOS_SECCION]
-            logger.info(
-                f"RAG tesis: dominante '{seccion_dominante}' (prefijo '{prefijo_dom}') → "
-                f"{len(docs)} fragmentos devueltos (sección + subsecciones)"
-            )
-    else:
-        # Sin metadata de sección (chunking fijo antiguo): top-k clásico
+    if not top_meta:
         docs = todos_docs[:k]
         logger.info(f"RAG tesis: {len(docs)} fragmentos (sin metadata de sección)")
+    else:
+        # Prefijos del config (maneja rangos como "4.1–4.3" → ["4.1","4.2","4.3"])
+        config_prefijos = _extraer_prefijos_rango(seccion)
+        top_prefijos    = [_extraer_prefijo(s) for s in top_meta if _extraer_prefijo(s)]
+
+        # Verificar que los prefijos del config correspondan al top semántico
+        config_relevante = bool(config_prefijos) and any(
+            any(pt == cp or pt.startswith(cp + ".") or cp.startswith(pt + ".")
+                for pt in top_prefijos)
+            for cp in config_prefijos
+        )
+
+        if config_relevante:
+            # Numeración del PDF coincide con el config: usar árbol directo
+            docs = [d for d in todos_docs
+                    if any(_es_subseccion(d.metadata.get("seccion", ""), cp)
+                           for cp in config_prefijos)]
+            docs = docs[:MAX_FRAGMENTOS_SECCION]
+            logger.info(
+                f"RAG tesis: prefijos config {config_prefijos} → "
+                f"{len(docs)} fragmentos (sección + subsecciones)"
+            )
+        else:
+            # Numeración diferente entre config y PDF: usar ancestro semántico del top-K
+            ancestor = _prefijo_ancestro_comun(top_prefijos)
+            if ancestor:
+                docs = [d for d in todos_docs
+                        if _es_subseccion(d.metadata.get("seccion", ""), ancestor)]
+                docs = docs[:MAX_FRAGMENTOS_SECCION]
+                logger.info(
+                    f"RAG tesis: ancestro semántico '{ancestor}' "
+                    f"(top prefijos: {sorted(set(top_prefijos))[:6]}) → "
+                    f"{len(docs)} fragmentos"
+                )
+            else:
+                # Sin ancestro común (secciones de capítulos distintos): usar dominante
+                seccion_dominante = Counter(top_meta).most_common(1)[0][0]
+                prefijo_dom = _extraer_prefijo(seccion_dominante)
+                if prefijo_dom:
+                    docs = [d for d in todos_docs
+                            if _es_subseccion(d.metadata.get("seccion", ""), prefijo_dom)]
+                else:
+                    docs = [d for d in todos_docs
+                            if d.metadata.get("seccion") == seccion_dominante]
+                docs = docs[:MAX_FRAGMENTOS_SECCION]
+                logger.info(
+                    f"RAG tesis: dominante '{seccion_dominante}' → "
+                    f"{len(docs)} fragmentos"
+                )
 
     fragmentos = [f"[Fragmento {i + 1}]\n{d.page_content}" for i, d in enumerate(docs)]
     resultado = "\n\n" + "\n\n---\n\n".join(fragmentos) + "\n"
@@ -405,6 +552,13 @@ def recuperar_contexto_cruzado(
                     continue
                 # Deduplicar: solo un fragmento por prefijo de sección
                 if prefijo_doc in prefijos_visitados:
+                    continue
+                # Descartar chunks que son solo encabezados sin contenido sustantivo
+                if len(doc.page_content.strip()) < _MIN_CHARS_CHUNK:
+                    logger.debug(
+                        f"[Cross-context] '{seccion_doc}' omitida en recuperación "
+                        f"({len(doc.page_content.strip())} chars — solo título)"
+                    )
                     continue
 
                 fragmento = doc.page_content[:_MAX_CHARS_POR_FRAGMENTO]
