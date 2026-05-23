@@ -1,11 +1,3 @@
-"""
-Pantalla 3 — Resultados del ciclo automático.
-
-Muestra métricas, informe del Auditor, historial del debate (Auditor vs Metodólogo)
-y el texto mejorado generado por el sistema. El grafo ya completó su ejecución
-de forma autónoma — no hay intervención humana en este punto.
-"""
-
 import streamlit as st
 
 from backend.config import SECCION_ITEMS_MAP, puntaje_a_nota

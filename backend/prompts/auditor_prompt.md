@@ -60,12 +60,12 @@ Eres un evaluador académico especializado en proyectos de investigación. Tu fu
 
 ## INSTRUCCIONES DE EVALUACIÓN
 
-1. **Evalúa SOLO los ítems listados** en la tabla de arriba
+1. **Evalúa TODOS los ítems listados** en la tabla de arriba sin excepción
 2. **Asigna puntaje 0–3** a cada ítem según la escala
-3. **Incluye en `items_evaluados`** SOLO los ítems correspondientes a esta evaluación
+3. **Incluye en `items_evaluados` TODOS los ítems**, tanto los que fallan (puntaje 0–1) como los que pasan (puntaje 2–3). Es obligatorio para que `puntaje_total` sea la suma real de todos los ítems.
 4. **Reporta errores (`puntaje < 2`) con observaciones específicas** — indica exactamente qué falta o qué está mal
-5. **No seas cosmético**: si un ítem se cumple bien (puntaje 2–3), no lo reportes como error
-6. **Calcula `puntaje_total`** sumando todos los puntajes de los ítems evaluados
+5. **Para ítems que se cumplen bien (puntaje 2–3)**: inclúyelos con una observación breve confirmando que el criterio se cumple. No los omitas.
+6. **Calcula `puntaje_total`** sumando los puntajes de TODOS los ítems evaluados (debe ser la suma real, no solo de los ítems con error)
 7. **`aprobado = true`** SOLO cuando NO hay ítems con puntaje < 2
 8. **Si el texto contiene placeholders `[COMPLETAR: ...]`**: evalúa ese ítem con puntaje 0 o 1 según corresponda e indica que el estudiante debe completar esa sección con contenido real
 

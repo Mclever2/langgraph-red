@@ -1,0 +1,14 @@
+{
+  "run_id": "91200d77-9ae3-403d-87e1-324600d255d8",
+  "arquitectura": "langgraph-hub-spoke",
+  "universidad": "upao",
+  "metricas": {
+    "rouge1": null,
+    "rouge2": null,
+    "rougeL": null,
+    "bleu": null,
+    "similitud_coseno": null,
+    "gain_score": null,
+    "sin_reescritura": true
+  }
+}

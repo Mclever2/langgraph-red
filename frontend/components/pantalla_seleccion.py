@@ -7,6 +7,7 @@ import streamlit as st
 from backend.config import (
     SECCIONES_TESIS, SECCION_ITEMS_MAP, DEPENDENCIAS_SECCIONES,
 )
+from config import Config
 from backend.rag import (
     recuperar_contexto, recuperar_contexto_cruzado, recuperar_vista_general,
     recuperar_contexto_teorico, listar_libros,
@@ -120,7 +121,7 @@ def render_pantalla_seleccion() -> None:
             max_iter = st.slider(
                 "Iteraciones de mejora automática:",
                 min_value=1, max_value=3,
-                value=1,
+                value=2,
                 help=(
                     "Ciclos automáticos Redactor → Auditor → Metodólogo. "
                     "1 = una pasada (rápido). 2-3 = el Redactor mejora el texto "
@@ -132,7 +133,7 @@ def render_pantalla_seleccion() -> None:
 
     # Flujo por iteración: Supervisor×8 + Aud + Met + Con + Dis + Debate + Red
     # + 1 auditoría final post-reescritura + 2 supervisores extra (margen)
-    max_pasos = 8 * max_iter * 2 + 6
+    max_pasos = Config.get_max_pasos(max_iter)
 
     tiempo_est_min = 7 * max_iter * 6 // 60
     tiempo_est_max = 7 * max_iter * 10 // 60
@@ -234,6 +235,11 @@ def render_pantalla_seleccion() -> None:
         "scores_subagentes":           [],
         "consenso_matematico_auditor": {},
         "loras_activas":               [],
+        "consenso_ejecutado":          False,
+        "disenso_ejecutado":           False,
+        "auditor_ejecutado":           False,
+        "metodologo_ejecutado":        False,
+        "debate_ejecutado":            False,
     }
 
     config = get_config()

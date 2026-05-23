@@ -1,10 +1,3 @@
-"""
-Gestión del session_state de Streamlit.
-
-Centraliza todos los valores por defecto, las funciones de reset y los
-helpers de lectura del estado del grafo LangGraph.
-"""
-
 import uuid
 
 import streamlit as st
@@ -23,7 +16,6 @@ _DEFAULTS: dict = {
     "rubrica_hash":          None,
     "rubrica_nombre":        None,
     "error_msg":             None,
-    "libro_subido_feedback": None,
     "estructura_toc":        None,   # dict {nombre_seccion: n_pagina} detectado del índice
     "universidad":           "upao",
     "programa":              "ingeniería de sistemas",
@@ -39,20 +31,19 @@ def init_session() -> None:
 
 
 def reset_todo() -> None:
-    """Reinicia toda la sesión para comenzar una nueva evaluación desde cero."""
-    st.session_state.thread_id       = str(uuid.uuid4())
-    st.session_state.graph_status    = "initial"
-    st.session_state.vector_store    = None
-    st.session_state.pdf_hash        = None
-    st.session_state.pdf_nombre      = None
+    """Reinicia toda la sesión para comenzar una nueva evaluación desde cero.
+    La selección de universidad/programa del sidebar se preserva intencionalmente."""
+    st.session_state.thread_id        = str(uuid.uuid4())
+    st.session_state.graph_status     = "initial"
+    st.session_state.vector_store     = None
+    st.session_state.pdf_hash         = None
+    st.session_state.pdf_nombre       = None
     st.session_state.rubrica_dinamica = None
-    st.session_state.rubrica_hash    = None
-    st.session_state.rubrica_nombre  = None
-    st.session_state.error_msg       = None
-    st.session_state.estructura_toc  = None
-    st.session_state.universidad     = "upao"
-    st.session_state.programa        = "ingeniería de sistemas"
-    st.session_state.modalidad       = "tesis"
+    st.session_state.rubrica_hash     = None
+    st.session_state.rubrica_nombre   = None
+    st.session_state.error_msg        = None
+    st.session_state.estructura_toc   = None
+    # universidad / programa / modalidad se preservan: el usuario los elige en el sidebar
 
 
 def reset_solo_grafo() -> None:

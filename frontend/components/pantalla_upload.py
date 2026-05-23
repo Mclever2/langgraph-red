@@ -1,14 +1,3 @@
-"""
-Pantalla 1 — Carga del PDF de tesis y (opcional) rúbrica de evaluación.
-
-Paso 1: El estudiante sube el PDF de su proyecto de tesis.
-         El sistema vectoriza el texto en ChromaDB ephemeral (RAG local).
-
-Paso 2 (opcional): El estudiante sube su propia rúbrica de evaluación en PDF.
-                   El sistema la parsea y la almacena en session_state.
-                   Si no sube ninguna, el sistema usa la rúbrica UPAO por defecto.
-"""
-
 import hashlib
 import uuid
 

@@ -1,20 +1,7 @@
-"""
-Sidebar de la aplicación — Estado del proceso + Panel de Biblioteca Metodológica.
-
-Renderiza:
-  - Indicador de estado del grafo (semáforo)
-  - Métricas rápidas (iteraciones, errores, puntaje) cuando el grafo está activo
-  - Botones de navegación (nueva evaluación / otra sección)
-  - Panel completo de gestión de la biblioteca de libros PDF
-  - Pie con el stack técnico
-"""
-
-import os
-
 import streamlit as st
 
 from backend.config import SECCION_ITEMS_MAP
-from backend.rag import agregar_libro, listar_libros, eliminar_libro
+from backend.rag import listar_libros
 
 from ..resources import biblioteca
 from ..session_manager import (
@@ -24,12 +11,24 @@ from ..session_manager import (
     reset_solo_grafo,
 )
 
+# Opciones disponibles: (etiqueta visible) → (codigo_universidad, nombre_programa)
+_UNIVERSIDADES: dict[str, tuple[str, str]] = {
+    "UPAO · Ingeniería de Sistemas":    ("upao", "ingeniería de sistemas"),
+    "Cayetano Heredia · Investigación": ("upch", "investigacion"),
+}
+
+_TITULOS_SIDEBAR: dict[str, str] = {
+    "upao": "🎓 Mentoría UPAO",
+    "upch": "🎓 Mentoría UPCH",
+}
+
 
 def render_sidebar() -> None:
     """Renderiza el sidebar completo de la aplicación."""
     with st.sidebar:
-        st.title("🎓 Mentoría UPAO")
-        st.caption("PoC #2 · LangGraph + RAG + Groq")
+        titulo = _TITULOS_SIDEBAR.get(st.session_state.get("universidad", "upao"), "🎓 Mentoría")
+        st.title(titulo)
+        st.caption("PoC #2 · LangGraph + RAG + OpenAI")
         st.divider()
 
         _render_estado()
@@ -78,10 +77,12 @@ def _render_estado() -> None:
 
 
 def _render_botones_navegacion() -> None:
-    """Botones de reset y navegación entre pantallas."""
+    """Botones de reset, selector de universidad y navegación entre pantallas."""
     if st.button("🔄 Nueva evaluación", use_container_width=True):
         reset_todo()
         st.rerun()
+
+    _render_selector_universidad()
 
     if st.session_state.graph_status in ("paused", "completed", "rag_ready"):
         if st.button("📄 Otra sección (mismo PDF)", use_container_width=True):
@@ -89,114 +90,63 @@ def _render_botones_navegacion() -> None:
             st.rerun()
 
 
-def _render_biblioteca() -> None:
-    """Panel de gestión de la biblioteca de libros metodológicos."""
-    st.subheader("📚 Biblioteca Metodológica")
-    st.caption(
-        "Sube libros de metodología de la investigación (PDF). "
-        "Se guardan en disco y enriquecen las sugerencias del Redactor."
+def _render_selector_universidad() -> None:
+    """Dropdown para seleccionar la universidad / rúbrica activa."""
+    opciones = list(_UNIVERSIDADES.keys())
+
+    # Determinar la opción actualmente seleccionada según session_state
+    univ_actual = st.session_state.get("universidad", "upao")
+    prog_actual  = st.session_state.get("programa", "ingeniería de sistemas")
+    idx_actual   = 0
+    for i, (univ, prog) in enumerate(_UNIVERSIDADES.values()):
+        if univ == univ_actual and prog == prog_actual:
+            idx_actual = i
+            break
+
+    # Bloquear el selector si ya hay un proceso activo para evitar cambios a mitad de evaluación
+    bloqueado = st.session_state.graph_status in ("paused", "completed")
+
+    seleccion = st.selectbox(
+        "Universidad / Rúbrica:",
+        options=opciones,
+        index=idx_actual,
+        disabled=bloqueado,
+        help=(
+            "Selecciona la institución para cargar su rúbrica y contexto de evaluación. "
+            "Cada universidad usa sus propios criterios y escala de puntuación."
+            if not bloqueado
+            else "Completa o reinicia la evaluación actual antes de cambiar de universidad."
+        ),
     )
 
-    # Feedback temporal tras operaciones
-    if st.session_state.libro_subido_feedback:
-        msg_tipo, msg_texto = st.session_state.libro_subido_feedback
-        if msg_tipo == "ok":
-            st.success(msg_texto)
-        else:
-            st.error(msg_texto)
-        st.session_state.libro_subido_feedback = None
+    nueva_univ, nuevo_prog = _UNIVERSIDADES[seleccion]
+    if nueva_univ != st.session_state.get("universidad") or nuevo_prog != st.session_state.get("programa"):
+        st.session_state.universidad = nueva_univ
+        st.session_state.programa    = nuevo_prog
+        st.rerun()
 
-    _render_agregar_libro()
+
+def _render_biblioteca() -> None:
+    """Panel informativo de la biblioteca de libros metodológicos."""
+    st.subheader("📚 Biblioteca Metodológica")
     _render_lista_libros()
 
 
-def _render_agregar_libro() -> None:
-    """Expander para subir e indexar un nuevo libro."""
-    with st.expander("➕ Agregar libro", expanded=False):
-        archivo_libro = st.file_uploader(
-            "Selecciona un PDF de metodología:",
-            type=["pdf"],
-            key="uploader_libro",
-            label_visibility="collapsed",
-        )
-        nombre_custom = st.text_input(
-            "Nombre del libro (para identificarlo):",
-            placeholder="Ej: Hernández Sampieri 2014 — Metodología",
-            key="nombre_libro_input",
-        )
-
-        if archivo_libro is not None:
-            nombre_final = nombre_custom.strip() or os.path.splitext(archivo_libro.name)[0]
-            libros_existentes = [l["nombre"] for l in listar_libros(biblioteca)]
-
-            if nombre_final in libros_existentes:
-                st.warning(
-                    f"Ya existe un libro con el nombre **{nombre_final}**. "
-                    "Cambia el nombre o elimina el anterior."
-                )
-            else:
-                if st.button(
-                    "📥 Indexar libro",
-                    type="primary",
-                    use_container_width=True,
-                    key="btn_indexar",
-                ):
-                    with st.spinner(f"Vectorizando '{nombre_final}'…"):
-                        try:
-                            n_frags = agregar_libro(
-                                biblioteca,
-                                archivo_libro.getvalue(),
-                                nombre_final,
-                            )
-                            st.session_state.libro_subido_feedback = (
-                                "ok",
-                                f"✅ '{nombre_final}' indexado ({n_frags} fragmentos).",
-                            )
-                        except Exception as exc:
-                            st.session_state.libro_subido_feedback = (
-                                "err",
-                                f"❌ Error: {exc}",
-                            )
-                    st.rerun()
-
-
 def _render_lista_libros() -> None:
-    """Muestra los libros indexados con opción de eliminar cada uno."""
+    """Muestra los libros indexados en la biblioteca."""
     libros = listar_libros(biblioteca)
     if libros:
         total_frags = sum(l["fragmentos"] for l in libros)
         st.caption(f"**{len(libros)} libro(s)** · {total_frags} fragmentos indexados")
-
         for libro in libros:
-            col_nombre, col_btn = st.columns([3, 1])
-            with col_nombre:
-                st.markdown(
-                    f"📖 **{libro['nombre']}**  \n"
-                    f"<span style='font-size:0.78rem;color:#888'>"
-                    f"{libro['fragmentos']} fragmentos</span>",
-                    unsafe_allow_html=True,
-                )
-            with col_btn:
-                if st.button(
-                    "🗑️",
-                    key=f"del_{libro['nombre']}",
-                    help=f"Eliminar '{libro['nombre']}' de la biblioteca",
-                ):
-                    n_eliminados = eliminar_libro(biblioteca, libro["nombre"])
-                    st.session_state.libro_subido_feedback = (
-                        "ok",
-                        f"🗑️ '{libro['nombre']}' eliminado ({n_eliminados} fragmentos).",
-                    )
-                    st.rerun()
+            st.markdown(
+                f"📖 **{libro['nombre']}**  \n"
+                f"<span style='font-size:0.78rem;color:#888'>"
+                f"{libro['fragmentos']} fragmentos</span>",
+                unsafe_allow_html=True,
+            )
     else:
-        st.info(
-            "La biblioteca está vacía. Sube libros de metodología para "
-            "enriquecer las sugerencias del Redactor.",
-            icon="💡",
-        )
-        st.caption(
-            "**Sugerencias:** Hernández Sampieri, Ñaupas Paitán, Tam Malaga, Bernal Torres"
-        )
+        st.info("Sin libros de referencia cargados.", icon="📚")
 
 
 def _render_stack_tecnico() -> None:
@@ -205,5 +155,5 @@ def _render_stack_tecnico() -> None:
     st.caption("• LLM: `llama-3.3-70b-versatile` (Groq)")
     st.caption("• Embeddings: `all-MiniLM-L6-v2` (local)")
     st.caption("• VectorDB tesis: ChromaDB ephemeral")
-    st.caption("• VectorDB libros: ChromaDB persistente")
+    st.caption("• VectorDB libros: ChromaDB (precargado)")
     st.caption("• Framework: LangGraph + Streamlit")

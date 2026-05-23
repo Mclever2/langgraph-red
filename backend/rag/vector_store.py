@@ -1,20 +1,4 @@
-"""
-Capa RAG del sistema de mentoría académica.
 
-Dos colecciones ChromaDB independientes:
-  ┌─ TESIS (EphemeralClient, in-memory) ──────────────────────────────────────┐
-  │  El PDF del estudiante. Efímero — se resetea al cerrar la sesión.         │
-  │  chunk_size=600, k=4                                                       │
-  └───────────────────────────────────────────────────────────────────────────┘
-  ┌─ BIBLIOTECA (PersistentClient, disco) ─────────────────────────────────────┐
-  │  Libros de metodología subidos por el docente/mentor.                      │
-  │  Sobrevive reinicios del servidor. chunk_size=800, k=3                     │
-  │  Path: ./chroma_db/biblioteca/ (configurable en backend/config.py)        │
-  └───────────────────────────────────────────────────────────────────────────┘
-
-NOTA ANTI-TOKEN-BURN:
-  Solo se inyectan los fragmentos recuperados (~2-3 KB), NO los PDFs completos.
-"""
 
 import io
 import os
@@ -39,12 +23,7 @@ MODELO_EMBEDDING = "sentence-transformers/all-MiniLM-L6-v2"
 _RE_LINEA_INDICE = re.compile(r'\.{4,}\s*\d{1,4}\s*$')
 
 def _es_chunk_indice(texto: str) -> bool:
-    """Detecta si un chunk es principalmente una tabla de contenidos o índice.
 
-    Heurística: si ≥35 % de las líneas no vacías tienen el patrón
-    'texto ......... N' (puntos seguidos de número al final), es un fragmento
-    de índice que no aporta contenido real al RAG.
-    """
     lineas = [l for l in texto.split('\n') if l.strip()]
     if not lineas:
         return False
@@ -58,16 +37,7 @@ K_RESULTADOS     = 4      # fragmentos a recuperar por consulta
 # ── Extracción de texto ───────────────────────────────────────────────────────
 
 def extraer_texto_pdf(pdf_bytes: bytes) -> str:
-    """
-    Extrae el texto completo de un PDF dado como bytes.
-    Usa pdfplumber que maneja PDFs nativos y escaneados básicos.
 
-    Args:
-        pdf_bytes: Contenido del archivo PDF como bytes
-
-    Returns:
-        Texto limpio concatenado de todas las páginas
-    """
     paginas = []
     try:
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
@@ -92,18 +62,7 @@ def construir_vector_store(
     embeddings: HuggingFaceEmbeddings,
     collection_name: str = "tesis_upao",
 ) -> Chroma:
-    """
-    Divide el texto en fragmentos, genera embeddings locales HuggingFace
-    y los almacena en ChromaDB EN MEMORIA (EphemeralClient).
 
-    Args:
-        texto:           Texto completo extraído del PDF
-        embeddings:      Instancia ya cargada de HuggingFaceEmbeddings
-        collection_name: Nombre único de la colección (evita colisiones entre PDFs)
-
-    Returns:
-        Chroma vector store listo para búsqueda de similitud
-    """
     if not texto.strip():
         raise ValueError("El texto extraído del PDF está vacío.")
 
@@ -140,25 +99,12 @@ def construir_vector_store(
     return vector_store
 
 
-# ── Recuperación de contexto ──────────────────────────────────────────────────
-
 def recuperar_contexto(
     vector_store: Chroma,
     seccion: str,
     k: int = K_RESULTADOS,
 ) -> str:
-    """
-    Busca en ChromaDB los k fragmentos más relevantes para la sección indicada.
-    Usa la query semántica definida en SECCIONES_TESIS (config.py).
 
-    Args:
-        vector_store: ChromaDB ya construido con el PDF del estudiante
-        seccion:      Nombre de la sección (debe coincidir con SECCIONES_TESIS)
-        k:            Número de fragmentos a recuperar
-
-    Returns:
-        Texto de los fragmentos concatenados con separador
-    """
     # Buscar la query configurada para esta sección
     query = seccion  # fallback: usar el nombre como query
     for sec_cfg in SECCIONES_TESIS:
@@ -186,27 +132,14 @@ def recuperar_contexto(
     return resultado
 
 
-# ── Utilidad: cargar modelo de embeddings (con cache en Streamlit) ────────────
-
 def cargar_modelo_embeddings() -> HuggingFaceEmbeddings:
-    """
-    Carga el modelo de embeddings HuggingFace.
-    NOTA: Llamar con @st.cache_resource en Streamlit para no recargar en cada rerun.
-    La primera ejecución descarga ~80 MB del modelo (solo una vez).
-    """
+
     logger.info(f"Cargando modelo de embeddings: {MODELO_EMBEDDING}")
     return HuggingFaceEmbeddings(
         model_name=MODELO_EMBEDDING,
         model_kwargs={"device": "cpu"},
         encode_kwargs={"normalize_embeddings": True},
     )
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# BIBLIOTECA DE LIBROS (ChromaDB PERSISTENTE EN DISCO)
-# ══════════════════════════════════════════════════════════════════════════════
-# Los libros de metodología se almacenan en ./chroma_db/biblioteca/ y sobreviven
-# entre reinicios del servidor. Se accede a ellos desde el sidebar de Streamlit.
 
 _BIBLIOTECA_COLLECTION = "biblioteca_metodologia"
 _CHUNK_LIBRO   = 800    # Fragmentos más grandes para libros (párrafos completos)
@@ -238,17 +171,7 @@ def agregar_libro(
     pdf_bytes: bytes,
     nombre_libro: str,
 ) -> int:
-    """
-    Vectoriza un PDF y lo agrega a la biblioteca persistente.
 
-    Args:
-        vs_libros:    Instancia de la biblioteca (PersistentClient)
-        pdf_bytes:    Contenido del PDF como bytes
-        nombre_libro: Nombre para mostrar en la UI (ej. "Hernandez Sampieri 2014")
-
-    Returns:
-        Número de fragmentos indexados del libro
-    """
     texto = extraer_texto_pdf(pdf_bytes)
     if not texto.strip():
         raise ValueError(f"El PDF '{nombre_libro}' está vacío o no tiene texto seleccionable.")
@@ -271,17 +194,7 @@ def precargar_libros_desde_carpeta(
     vs_libros: Chroma,
     libros_ya_cargados: List[str],
 ) -> List[str]:
-    """
-    Lee todos los PDFs de la carpeta BOOKS_PRELOAD_DIR y los agrega a la biblioteca
-    solo si no están ya indexados (evita duplicados al reiniciar).
 
-    Args:
-        vs_libros:          Instancia de la biblioteca
-        libros_ya_cargados: Lista de nombres ya presentes (de listar_libros())
-
-    Returns:
-        Lista de nombres de libros recién indexados
-    """
     if not os.path.isdir(BOOKS_PRELOAD_DIR):
         os.makedirs(BOOKS_PRELOAD_DIR, exist_ok=True)
         return []
@@ -311,18 +224,7 @@ def recuperar_contexto_teorico(
     seccion: str,
     k: int = _K_LIBROS,
 ) -> str:
-    """
-    Busca en la biblioteca los fragmentos teóricos más relevantes para la sección.
-    Si la biblioteca está vacía, retorna "" (el sistema funciona sin libros).
 
-    Args:
-        vs_libros: Biblioteca persistente de libros
-        seccion:   Nombre de la sección (mismo que en SECCIONES_TESIS)
-        k:         Número de fragmentos a recuperar
-
-    Returns:
-        Texto de los fragmentos con su fuente, o "" si no hay libros.
-    """
     try:
         n_total = vs_libros._collection.count()
         if n_total == 0:
@@ -375,12 +277,7 @@ def listar_libros(vs_libros: Chroma) -> List[dict]:
 
 
 def eliminar_libro(vs_libros: Chroma, nombre_libro: str) -> int:
-    """
-    Elimina todos los fragmentos de un libro de la biblioteca.
 
-    Returns:
-        Número de fragmentos eliminados
-    """
     try:
         coleccion = vs_libros._collection
         resultados = coleccion.get(

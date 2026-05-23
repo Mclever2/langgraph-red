@@ -138,6 +138,7 @@ def make_nodo_disenso(llm: ChatOpenAI):
             "resultado_disenso": resultado_disenso,
             "iter_disenso":      n_iter + 1,
             "loras_activas":     loras_usadas,
+            "disenso_ejecutado":  True,
         }
 
     return nodo_disenso

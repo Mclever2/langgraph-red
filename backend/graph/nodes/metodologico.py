@@ -160,6 +160,7 @@ def make_nodo_metodologico(llm: ChatOpenAI):
             "observaciones_metodologicas": observaciones,
             "iter_metodologica":           n_iter + 1,
             "loras_activas":               loras_usadas,
+            "metodologo_ejecutado":        True,
         }
 
     return nodo_metodologico

@@ -38,6 +38,11 @@ class Config:
     LOG_LEVEL: str = os.environ.get("LOG_LEVEL", "INFO")
 
     @classmethod
+    def get_max_pasos(cls, max_iter: int) -> int:
+        """Calcula de forma dinámica el límite de pasos del supervisor."""
+        return max_iter * 12 + 6
+
+    @classmethod
     def get_next_groq_key(cls, index: int = 0) -> str:
         if not cls.GROQ_KEYS:
             raise EnvironmentError(

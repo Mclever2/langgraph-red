@@ -1,18 +1,3 @@
-"""
-ChromaDB efímero para el PDF del estudiante.
-
-Ciclo de vida: se crea por sesión y se destruye al cerrar el navegador.
-Responsabilidad única: indexar la tesis y recuperar contexto por sección.
-
-Estrategia de chunking:
-  Si el PDF tiene índice (TOC) detectado, se divide el contenido por secciones
-  usando los números de página del TOC. Cada sección queda como uno o varios
-  documentos con metadata {"seccion": nombre}. Esto evita que fragmentos fijos
-  corten secciones a la mitad y permite recuperar la sección correcta de forma
-  más precisa.
-
-  Si no hay TOC, se aplica el splitter clásico de tamaño fijo como fallback.
-"""
 
 import logging
 import re
@@ -64,13 +49,7 @@ def _extraer_prefijos_rango(seccion: str) -> list[str]:
 
 
 def _prefijo_ancestro_comun(prefijos: list[str]) -> str:
-    """
-    Halla el prefijo numérico ancestro común más largo de una lista.
-    ["2.1.1", "2.1.2"] → "2.1"
-    ["3.1",   "3.2"]   → "3"
-    ["2",     "4"]     → ""  (capítulos distintos, no se amalgaman)
-    Sube máximo 2 niveles para no sobrepasar el contexto relevante.
-    """
+
     unicos = list({p for p in prefijos if p})
     if not unicos:
         return ""
@@ -102,9 +81,6 @@ K_RESULTADOS  = 4        # solo para fallback sin metadata de sección
 K_INICIAL     = 6        # cuántos resultados top usar para detectar la sección dominante
 MAX_FRAGMENTOS_SECCION = 20  # límite de fragmentos por sección (~12 000 chars máx)
 
-# Umbral mínimo de caracteres para considerar que un chunk tiene contenido real.
-# Por debajo de este valor, el chunk es solo un encabezado/título y no aporta
-# información útil — incluirlo confunde a los agentes (ven la sección pero vacía).
 _MIN_CHARS_CHUNK = 80
 
 
@@ -146,23 +122,7 @@ def _agrupar_por_toc(
     paginas: list[tuple[int, str]],
     estructura_toc: dict[str, int],
 ) -> list[tuple[str, str, int]]:
-    """
-    Agrupa las páginas de contenido en secciones según el TOC.
 
-    Algoritmo mejorado:
-      - Páginas de continuación (ninguna sección empieza en ellas): texto completo
-        a la sección que estaba en curso.
-      - Páginas donde empieza una o más secciones nuevas: se detectan las posiciones
-        de cada encabezado en el texto con _encontrar_encabezado_en_texto, se ordena
-        por posición y se reparte el texto en segmentos. El texto anterior al primer
-        encabezado va a la sección anterior. Si no se detecta ningún encabezado,
-        todo el texto va a la última sección que empieza en esa página (fallback).
-
-    Returns:
-        Lista de (nombre_seccion, texto_seccion, pagina_inicio), solo secciones
-        con contenido no vacío. Si no hay TOC o no hay coincidencias, retorna
-        un único grupo con todo el texto.
-    """
     if not estructura_toc or not paginas:
         texto_total = "\n\n".join(t for _, t in sorted(paginas))
         return [("Documento completo", texto_total, 1)]
@@ -247,12 +207,7 @@ def _secciones_a_documentos(
     collection_name: str,
     splitter: RecursiveCharacterTextSplitter,
 ) -> list[Document]:
-    """
-    Convierte grupos de sección en documentos para ChromaDB.
 
-    Secciones cortas → un documento.
-    Secciones largas → múltiples chunks preservando el nombre de sección en metadata.
-    """
     docs: list[Document] = []
     for nombre, texto, pag_inicio in grupos:
         texto_limpio = texto.strip()
@@ -294,18 +249,7 @@ def _palabras_clave(texto: str) -> set[str]:
 
 
 def _buscar_query_semantica(seccion: str) -> str:
-    """
-    Elige la query de SECCIONES_TESIS más adecuada para una sección del TOC del PDF.
 
-    Estrategia en tres pasos:
-      1. Nombre exacto (más fiable).
-      2. Overlap de palabras clave (robusto a formatos Proyecto vs Informe de Tesis).
-      3. Prefijo numérico (último recurso; puede ser ambiguo entre formatos).
-
-    El matching por palabras clave evita confundir, p.ej.,
-    "2.2. Objetivos de la investigación" (Informe) con
-    "2.2 Investigaciones antecedentes" (Proyecto) aunque compartan el prefijo 2.2.
-    """
     # 1. Coincidencia exacta
     for sec in SECCIONES_TESIS:
         if sec["nombre"] == seccion:
@@ -343,22 +287,7 @@ def construir_vector_store(
     embeddings: HuggingFaceEmbeddings,
     collection_name: str = "tesis_upao",
 ) -> Chroma:
-    """
-    Divide el contenido de la tesis en fragmentos y los indexa en ChromaDB en memoria.
 
-    Estrategia:
-      - Con TOC: agrupa páginas por sección → cada sección es uno o varios documentos.
-      - Sin TOC: splitter clásico de tamaño fijo sobre el texto completo.
-
-    Args:
-        paginas:         Lista de (numero_pagina_1indexed, texto_pagina).
-        estructura_toc:  Dict {nombre_seccion: pagina_inicio} del índice del PDF.
-        embeddings:      Modelo de embeddings ya cargado.
-        collection_name: Nombre único de la colección (evita colisiones entre PDFs).
-
-    Returns:
-        Chroma vector store listo para búsqueda de similitud.
-    """
     if not paginas:
         raise ValueError("El texto extraído del PDF está vacío.")
 
@@ -405,20 +334,7 @@ def recuperar_contexto(
     seccion: str,
     k: int = K_RESULTADOS,
 ) -> str:
-    """
-    Recupera el contexto del PDF del estudiante para la sección indicada.
 
-    Estrategia:
-      1. Ranking semántico de todos los fragmentos del store.
-      2. Determina los prefijos de sección que corresponden a la query:
-         a. Extrae prefijos del nombre de config (maneja rangos "4.1–4.3").
-         b. Valida que esos prefijos coincidan semánticamente con el top-K.
-            Si coinciden → usa los prefijos del config (numeración igual en PDF y config).
-            Si no coinciden → el PDF usa otra numeración; busca el ancestro común
-            de las secciones del top-K para recuperar el árbol correcto.
-      3. Devuelve hasta MAX_FRAGMENTOS_SECCION fragmentos del árbol detectado,
-         ordenados por similitud semántica.
-    """
     from collections import Counter
 
     query = _buscar_query_semantica(seccion)
@@ -521,18 +437,7 @@ def recuperar_contexto_cruzado(
     vector_store: Chroma,
     seccion_principal: str,
 ) -> str:
-    """
-    Recupera contexto cruzado inteligente desde el vector store usando
-    consultas semánticas estructurales — sin depender de un mapa hardcodeado.
 
-    Objetivo: dar a los agentes fragmentos representativos de las secciones
-    del proyecto que son estructuralmente relevantes para cualquier evaluación
-    (problema, objetivos, hipótesis, variables, metodología…), excluyendo
-    la sección que ya se está evaluando en el contexto principal.
-
-    Los agentes reciben este contexto y deciden qué partes usar con criterio
-    propio para verificar coherencia cruzada.
-    """
     prefijo_principal = _extraer_prefijo(seccion_principal)
     partes: list[str] = []
     prefijos_visitados: set[str] = set()
@@ -581,13 +486,7 @@ def recuperar_contexto_cruzado(
 
 
 def recuperar_vista_general(vector_store: Chroma) -> str:
-    """
-    Recupera un fragmento representativo de cada capítulo principal del documento.
 
-    Útil para la opción 'Vista general del proyecto': ofrece una panorámica
-    del documento completo sin entrar al detalle de ninguna sección específica.
-    Se toma el chunk más largo (más informativo) de cada capítulo (prefijo 1, 2, 3…).
-    """
     try:
         result = vector_store._collection.get(include=["metadatas", "documents"])
         metadatas = result.get("metadatas") or []
@@ -622,13 +521,7 @@ def recuperar_vista_general(vector_store: Chroma) -> str:
 
 
 def obtener_stats_secciones(vector_store: Chroma) -> list[dict]:
-    """
-    Devuelve estadísticas por sección del vector store:
-      [{"seccion": str, "pagina_inicio": int, "chars": int, "n_fragmentos": int}]
 
-    Ordenado por página de inicio. Útil para mostrar al usuario cómo quedó
-    la división del PDF (número de caracteres por sección).
-    """
     try:
         result = vector_store._collection.get(include=["metadatas", "documents"])
         metadatas = result.get("metadatas") or []

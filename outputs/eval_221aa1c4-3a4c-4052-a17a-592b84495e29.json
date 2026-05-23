@@ -1,0 +1,29 @@
+{
+  "run_id": "221aa1c4-3a4c-4052-a17a-592b84495e29",
+  "arquitectura": "langgraph-hub-spoke",
+  "universidad": "upao",
+  "metricas": {
+    "rouge1_f": 0.539,
+    "rouge2_f": 0.4892,
+    "rougeL_f": 0.5248,
+    "bleu_score": 0.2899,
+    "similitud_coseno": 0.7949,
+    "interpretacion": "mejora baja",
+    "kappa": null,
+    "nota": "Kappa indefinido — metodólogo clasificó todos los turnos igual (sin varianza). No aplica la fórmula de Cohen.",
+    "turnos_analizados": 2,
+    "detalle": {
+      "etiquetas_auditor": [
+        1,
+        0
+      ],
+      "etiquetas_metodologo": [
+        1,
+        1
+      ]
+    },
+    "gain_score": 0.0526,
+    "puntaje_inicial": 2.0,
+    "puntaje_final": 3.0
+  }
+}

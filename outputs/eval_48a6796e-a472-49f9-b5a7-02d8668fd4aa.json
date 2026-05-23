@@ -1,0 +1,18 @@
+{
+  "run_id": "48a6796e-a472-49f9-b5a7-02d8668fd4aa",
+  "arquitectura": "langgraph-hub-spoke",
+  "universidad": "upao",
+  "metricas": {
+    "rouge1_f": 0.0,
+    "rouge2_f": 0.0,
+    "rougeL_f": 0,
+    "bleu_score": 0.0,
+    "similitud_coseno": 0.0,
+    "interpretacion": "sin mejora detectada",
+    "kappa": null,
+    "nota": "sin mejora detectada",
+    "gain_score": 0.0,
+    "puntaje_inicial": 6.0,
+    "puntaje_final": 6.0
+  }
+}
