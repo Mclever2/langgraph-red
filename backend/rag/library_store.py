@@ -15,7 +15,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from backend.config import LIBRARY_CHROMA_PATH, BOOKS_PRELOAD_DIR, SECCIONES_TESIS
-from .extractor import extraer_texto_pdf
+from .extractor import extraer_contenido_sin_indice
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +59,8 @@ def agregar_libro(
     Returns:
         Número de fragmentos indexados.
     """
-    texto = extraer_texto_pdf(pdf_bytes)
-    if not texto.strip():
+    paginas_contenido, _ = extraer_contenido_sin_indice(pdf_bytes)
+    if not paginas_contenido:
         raise ValueError(f"El PDF '{nombre_libro}' está vacío o no tiene texto seleccionable.")
 
     splitter = RecursiveCharacterTextSplitter(
@@ -68,10 +68,9 @@ def agregar_libro(
         chunk_overlap=_OVERLAP_LIBRO,
         separators=["\n\n", "\n", ". ", "   ", " ", ""],
     )
-    docs = splitter.create_documents(
-        [texto],
-        metadatas=[{"fuente": nombre_libro, "tipo": "libro_metodologia"}],
-    )
+    textos = [texto for _, texto in paginas_contenido]
+    metadatas = [{"fuente": nombre_libro, "tipo": "libro_metodologia"} for _ in paginas_contenido]
+    docs = splitter.create_documents(textos, metadatas=metadatas)
     vs_libros.add_documents(docs)
     logger.info(f"Libro '{nombre_libro}' indexado: {len(docs)} fragmentos")
     return len(docs)

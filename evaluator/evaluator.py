@@ -26,6 +26,7 @@ def evaluar(datos: dict) -> dict:
     texto_final = datos.get("texto_final", "")
     puntaje_final = float(datos.get("puntaje_final") or 0.0)
     puntaje_inicial = float(datos.get("puntaje_inicial") or 0.0)
+    puntaje_maximo = float(datos.get("puntaje_maximo") or 0.0)
     historial_debate = datos.get("historial_debate", [])
 
     resultado = {
@@ -37,7 +38,7 @@ def evaluar(datos: dict) -> dict:
             **calcular_bleu(texto_inicial, texto_final),
             **calcular_similitud_coseno(texto_inicial, texto_final),
             **calcular_kappa(historial_debate),
-            **calcular_gain_score(puntaje_inicial, puntaje_final),
+            **calcular_gain_score(puntaje_inicial, puntaje_final, puntaje_maximo),
         },
     }
 

@@ -1,12 +1,14 @@
 def calcular_gain_score(
     puntaje_inicial: float,
     puntaje_final: float,
-    puntaje_maximo: float = 3.0,
+    puntaje_maximo: float = 0.0,
 ) -> dict:
     """
     Gain Score normalizado: mejora relativa al máximo posible.
     Fórmula: (puntaje_final - puntaje_inicial) / (puntaje_maximo - puntaje_inicial)
     """
+    if puntaje_maximo <= 0:
+        return {"gain_score": None, "nota": "puntaje máximo no disponible"}
     if puntaje_maximo == puntaje_inicial:
         return {"gain_score": 1.0, "nota": "puntaje inicial ya era máximo"}
 

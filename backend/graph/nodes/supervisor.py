@@ -2,87 +2,160 @@
 Agente Supervisor Orquestador — Corazón de la red multiagente.
 
 En la arquitectura de RED PURA, este nodo es el único que decide el flujo.
-Lee el estado completo y elige dinámicamente qué agente ejecutar a continuación,
-usando structured output (Pydantic) para garantizar una decisión válida.
+El LLM analiza el estado completo y elige el siguiente agente a ejecutar.
+Si el LLM falla o devuelve un valor inválido, se aplica un fallback determinista.
 
 Flujo:
-  START → supervisor → [redactor | auditor | metodologico | debate | consenso | disenso | humano]
+  START → supervisor → [redactor | auditor | metodologico | debate | consenso | disenso | fin]
               ↑______________________________________________|
   (todos los agentes regresan al supervisor tras su ejecución)
 
 Protección anti-bucle infinito:
   - pasos_ejecutados se incrementa en cada llamada al supervisor
-  - Si pasos_ejecutados >= max_pasos_red → fuerza "humano" sin llamar al LLM
+  - Si pasos_ejecutados >= max_pasos_red → fuerza "fin" sin llamar al LLM
   - Capa adicional: recursion_limit en workflow.py
 """
 
 import logging
-from typing import Literal
 
-from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
-from pydantic import BaseModel, Field
 
 from ..state import MentoriaState
 from ._utils import cargar_prompt, invocar_con_backoff
 
 logger = logging.getLogger(__name__)
 
-
-# ── Modelo de decisión estructurada ──────────────────────────────────────────
-
-class DecisionSupervisor(BaseModel):
-    """Decisión de routing del Supervisor."""
-    siguiente: Literal[
-        "redactor", "auditor", "metodologico",
-        "debate_auditor", "debate_metodologo",
-        "consenso", "disenso", "fin"
-    ] = Field(description="Nombre del agente a ejecutar a continuación, o 'fin' para terminar")
-    razon: str = Field(
-        description="Explicación técnica breve de por qué se eligió este agente (máx. 2 oraciones)"
-    )
-    instrucciones: str = Field(
-        description="Instrucciones específicas y accionables para el agente elegido"
-    )
+NODOS_VALIDOS = {
+    "auditor", "metodologico", "consenso", "disenso",
+    "debate", "redactor", "fin"
+}
 
 
-# ── Fábrica del nodo ──────────────────────────────────────────────────────────
+def _fallback_routing(state: MentoriaState) -> str:
+    """
+    Fallback determinista SOLO si el LLM falla o devuelve valor inválido.
+    Este es el último recurso, no el camino normal.
+    """
+    n_iter        = state.get("numero_iteracion", 0)
+    max_iter      = state.get("max_iteraciones", 3)
+    n_errores     = len(state.get("errores_rubrica") or [])
+    pasos         = state.get("pasos_ejecutados", 0)
+    max_pasos     = state.get("max_pasos_red", 40)
+    iter_auditada = state.get("iter_auditada", 0)
 
-def make_nodo_supervisor(llm: ChatGroq):
+    if pasos >= max_pasos:
+        return "fin"
+    if not iter_auditada:
+        return "auditor"
+    if not state.get("iter_metodologica"):
+        return "metodologico"
+    if not state.get("iter_consenso"):
+        return "consenso"
+    if not state.get("iter_disenso"):
+        return "disenso"
+    # El debate solo se vuelve a correr si aún quedan iteraciones por hacer.
+    # Cuando n_iter >= max_iter solo necesitamos la auditoría final del texto.
+    if n_errores > 0 and not state.get("debate_completado", False) and n_iter < max_iter:
+        return "debate"
+    if state.get("texto_iterado") is None or (n_errores > 0 and n_iter < max_iter):
+        return "redactor"
+    # Tras la reescritura del Redactor, el Auditor debe evaluar el texto mejorado
+    # antes de poder terminar (iter_auditada <= n_iter significa que el Auditor
+    # aún no evaluó la última versión del texto).
+    if state.get("texto_iterado") and iter_auditada <= n_iter:
+        return "auditor"
+    return "fin"
+
+
+def _validar_decision_semantica(siguiente: str, state: MentoriaState) -> str | None:
+    """
+    Valida que la decisión del LLM sea semánticamente coherente con el estado.
+    Retorna None si es válida, o un string con el motivo del rechazo si no lo es.
+    """
+    n_iter    = state.get("numero_iteracion", 0)
+    max_iter  = state.get("max_iteraciones", 3)
+    n_errores = len(state.get("errores_rubrica") or [])
+
+    iter_auditada     = state.get("iter_auditada", 0)
+    iter_metodologica = state.get("iter_metodologica", 0)
+    iter_consenso     = state.get("iter_consenso", 0)
+    iter_disenso      = state.get("iter_disenso", 0)
+    debate_completado = state.get("debate_completado", False)
+
+    auditor_ok      = iter_auditada > n_iter
+    metodologico_ok = iter_metodologica > n_iter
+    consenso_ok     = iter_consenso > n_iter
+    disenso_ok      = iter_disenso > n_iter
+
+    # Ciclo completo: ya se generó texto y se alcanzó el máximo de iteraciones.
+    # Excepción: permitir UNA pasada final del Auditor sobre el texto reescrito
+    # (iter_auditada <= n_iter significa que el Auditor aún no evaluó esta versión).
+    if n_iter >= max_iter and state.get("texto_iterado") and siguiente != "fin":
+        if siguiente == "auditor" and not auditor_ok:
+            return None  # auditoría final del texto mejorado — válida
+        return f"ciclo completo (iter {n_iter}/{max_iter}) con texto generado — debe ser fin"
+
+    if siguiente == "fin":
+        if not auditor_ok:
+            return "fin sin auditor ejecutado"
+        if n_errores > 0 and n_iter < max_iter:
+            return f"fin con {n_errores} errores y {max_iter - n_iter} iteraciones restantes"
+        if not state.get("texto_iterado"):
+            return "fin sin texto mejorado generado"
+
+    if siguiente == "redactor":
+        if not consenso_ok:
+            return "redactor sin consenso ejecutado"
+        if not disenso_ok:
+            return "redactor sin disenso ejecutado"
+
+    if siguiente == "consenso" and (not auditor_ok or not metodologico_ok):
+        return "consenso sin auditor y metodólogo completos"
+
+    if siguiente == "disenso" and (not auditor_ok or not metodologico_ok):
+        return "disenso sin auditor y metodólogo completos"
+
+    if siguiente == "debate" and n_errores == 0:
+        return "debate sin errores activos"
+
+    if siguiente == "debate" and debate_completado:
+        return "debate ya ejecutado en esta iteración — ir a redactor"
+
+    return None  # decisión válida
+
+
+def make_nodo_supervisor(llm: ChatOpenAI):
     """
     Fábrica del Supervisor Orquestador.
 
     Devuelve un nodo que:
       1. Verifica el límite de pasos (anti-bucle)
-      2. Llama al LLM con el estado completo
-      3. Retorna la decisión de routing + actualizaciones de estado
+      2. Llama al LLM con el estado completo para decidir el siguiente nodo
+      3. Valida la respuesta y aplica fallback si es inválida
+      4. Retorna la decisión de routing + actualizaciones de estado
     """
     plantilla = cargar_prompt("supervisor_red_prompt.md")
-    llm_struct = llm.with_structured_output(DecisionSupervisor)
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", plantilla),
-        ("human", "Analiza el estado actual y decide el siguiente paso de la red."),
+        ("human", "Decide el siguiente nodo."),
     ])
-    chain = prompt | llm_struct
+    chain = prompt | llm
 
     def nodo_supervisor(state: MentoriaState) -> dict:
-        pasos      = state.get("pasos_ejecutados", 0)
-        max_pasos  = state.get("max_pasos_red", 30)
-        n_iter     = state.get("numero_iteracion", 0)
-        max_iter   = state.get("max_iteraciones", 3)
-        n_errores  = len(state.get("errores_rubrica", []))
+        pasos     = state.get("pasos_ejecutados", 0)
+        max_pasos = state.get("max_pasos_red", 30)
+        n_iter    = state.get("numero_iteracion", 0)
+        max_iter  = state.get("max_iteraciones", 3)
+        n_errores = len(state.get("errores_rubrica") or [])
 
-        iter_auditada          = state.get("iter_auditada", 0)
-        iter_metodologica      = state.get("iter_metodologica", 0)
-        iter_consenso          = state.get("iter_consenso", 0)
-        iter_disenso           = state.get("iter_disenso", 0)
-        ronda_debate           = state.get("ronda_debate", 0)
-        max_rondas             = state.get("max_rondas_debate", 2)
-        debate_auditor_ronda   = state.get("debate_auditor_ronda", 0)
-        debate_metodologo_ronda = state.get("debate_metodologo_ronda", 0)
+        iter_auditada     = state.get("iter_auditada", 0)
+        iter_metodologica = state.get("iter_metodologica", 0)
+        iter_consenso     = state.get("iter_consenso", 0)
+        iter_disenso      = state.get("iter_disenso", 0)
+        debate_completado = state.get("debate_completado", False)
 
-        # iter_xxx = n_iter+1 tras cada ejecución → "corrió en este ciclo" = iter > n_iter
         auditor_ok      = iter_auditada > n_iter
         metodologico_ok = iter_metodologica > n_iter
         consenso_ok     = iter_consenso > n_iter
@@ -92,213 +165,83 @@ def make_nodo_supervisor(llm: ChatGroq):
             f"[Supervisor] Paso {pasos + 1}/{max_pasos} | "
             f"Iter {n_iter}/{max_iter} | Errores={n_errores} | "
             f"Aud={'✓' if auditor_ok else '✗'} Met={'✓' if metodologico_ok else '✗'} "
-            f"Debate={ronda_debate}/{max_rondas}"
+            f"Debate={'✓' if debate_completado else '✗'}"
         )
 
         # ── Protección anti-bucle (capa semántica) ────────────────────────────
         if pasos >= max_pasos:
             logger.warning(f"[Supervisor] Límite de pasos ({pasos}/{max_pasos}) → fin")
-            resumen = (
-                f"Límite de pasos alcanzado ({pasos}). "
-                f"Iteraciones: {n_iter}/{max_iter}. Errores pendientes: {n_errores}."
+            return {
+                "siguiente_nodo":           "fin",
+                "instrucciones_supervisor": f"Límite de pasos alcanzado ({pasos}). Fin forzado.",
+                "plan_supervisor":          "[FIN] Límite de pasos alcanzado",
+                "pasos_ejecutados":         pasos + 1,
+            }
+
+        # ── Terminación determinista: ciclo completo sin llamar al LLM ────────
+        # Condición: se alcanzó el máximo de iteraciones, existe texto mejorado
+        # Y el Auditor ya evaluó esa última versión (auditor_ok=True).
+        # Sin la comprobación de auditor_ok, el Redactor incrementaría
+        # numero_iteracion y el Supervisor terminaría sin que el Auditor
+        # haya visto el texto mejorado.
+        if n_iter >= max_iter and state.get("texto_iterado") and auditor_ok:
+            logger.info(
+                f"[Supervisor] Ciclo completo: iter {n_iter}/{max_iter} con texto generado y auditado → fin"
             )
             return {
                 "siguiente_nodo":           "fin",
-                "instrucciones_supervisor": resumen,
-                "plan_supervisor":          resumen,
+                "instrucciones_supervisor": f"Ciclo {n_iter}/{max_iter} completado con texto mejorado y auditado.",
+                "plan_supervisor":          "[FIN] Ciclo completado",
                 "pasos_ejecutados":         pasos + 1,
             }
 
-        # ══════════════════════════════════════════════════════════════════════
-        # ROUTING DETERMINISTA — Arquitectura de RED:
-        #   Auditor → Metodólogo → Consenso → Disenso → Debate → Redactor
-        #   El Redactor es la SÍNTESIS del ciclo, no el inicio.
-        #   Condición: iter_xxx > n_iter significa "ya corrió en este ciclo".
-        # ══════════════════════════════════════════════════════════════════════
+        # ── Construir contexto para el LLM ────────────────────────────────────
+        llm_input = {
+            "seccion":             state.get("seccion_objetivo", ""),
+            "numero_iteracion":    n_iter,
+            "max_iteraciones":     max_iter,
+            "auditor_ok":          auditor_ok,
+            "metodologico_ok":     metodologico_ok,
+            "consenso_ok":         consenso_ok,
+            "disenso_ok":          disenso_ok,
+            "n_errores":           n_errores,
+            "debate_completado":   debate_completado,
+            "puntaje_estimado":    state.get("puntaje_estimado"),
+            "tiene_texto_iterado": bool(state.get("texto_iterado")),
+        }
 
-        force       = None
-        force_razon = ""
-        force_inst  = ""
-
-        seccion = state["seccion_objetivo"]
-
-        if not auditor_ok:
-            # Fase 1 — El Auditor evalúa el texto actual (original o mejorado)
-            fuente = "texto mejorado" if state.get("texto_iterado") else "texto original del PDF"
-            force       = "auditor"
-            force_razon = f"Ciclo {n_iter}: Auditor evalúa el {fuente}"
-            force_inst  = (
-                f"Evalúa rigurosamente '{seccion}' contra todos los ítems de la rúbrica. "
-                "Puntúa cada ítem 0-3 y señala errores bloqueantes (puntaje < 2)."
-            )
-
-        elif not metodologico_ok:
-            # Fase 2 — El Metodólogo evalúa rigor y coherencia cruzada
-            force       = "metodologico"
-            force_razon = f"Ciclo {n_iter}: Metodólogo evalúa rigor científico"
-            force_inst  = (
-                "Evalúa el rigor metodológico y la coherencia con otras secciones. "
-                "Identifica inconsistencias con el diseño, variables, hipótesis o instrumentos."
-            )
-
-        elif not consenso_ok:
-            # Fase 3 — CONSENSO obligatorio: síntesis de acuerdos entre evaluadores
-            force       = "consenso"
-            force_razon = f"Ciclo {n_iter}: Consenso obligatorio — sintetiza acuerdos entre evaluadores"
-            force_inst  = (
-                "Identifica en qué puntos coinciden el Auditor y el Metodólogo. "
-                "Prioriza los errores más críticos para el debate."
-            )
-
-        elif not disenso_ok:
-            # Fase 4 — DISENSO obligatorio: identifica conflictos entre evaluadores
-            force       = "disenso"
-            force_razon = f"Ciclo {n_iter}: Disenso obligatorio — identifica conflictos entre evaluadores"
-            force_inst  = (
-                "Identifica contradicciones entre Auditor y Metodólogo. "
-                "Señala ítems donde sus evaluaciones son opuestas y recomienda cómo resolverlos."
-            )
-
-        elif debate_auditor_ronda > debate_metodologo_ronda:
-            # Fase 5b — DEBATE: Auditor ya argumentó, Metodólogo aún no respondió
-            # El Metodólogo lee el argumento directamente del estado compartido.
-            force       = "debate_metodologo"
-            force_razon = (
-                f"Debate ronda {debate_auditor_ronda}: "
-                "Metodólogo evalúa argumento del Auditor (lee desde estado)"
-            )
-            force_inst  = (
-                "Lee argumento_debate_auditor del estado. "
-                "Emite veredicto estructurado ítem por ítem: confirmado o descartado. "
-                "Actualiza errores_rubrica eliminando los descartados."
-            )
-
-        elif n_errores > 0 and ronda_debate < max_rondas:
-            # Fase 5a — DEBATE: hay errores, hay rondas, Auditor inicia la siguiente ronda
-            items_str = ", ".join(
-                f"ítem {e['item_numero']}"
-                for e in state.get("errores_rubrica", [])[:6]
-            )
-            force       = "debate_auditor"
-            force_razon = (
-                f"DEBATE OBLIGATORIO: {n_errores} errores · "
-                f"Ronda {ronda_debate + 1}/{max_rondas} — Auditor argumenta"
-            )
-            force_inst  = (
-                f"Defiende con evidencia concreta los errores pendientes: {items_str}. "
-                "Escribe tu argumento al estado (argumento_debate_auditor). "
-                "El Metodólogo responderá en el siguiente paso."
-            )
-
-        elif n_iter < max_iter and (
-            n_errores > 0 or not state.get("texto_iterado")
-        ):
-            # Fase 6 — REDACTOR:
-            #   a) Hay errores que corregir, o
-            #   b) El debate resolvió todos los errores conceptualmente pero el
-            #      texto mejorado aún no se ha generado (texto_iterado vacío).
-            if n_errores > 0:
-                errores_crit = "; ".join(
-                    f"ítem {e['item_numero']}: {e['descripcion'][:60]}"
-                    for e in state.get("errores_rubrica", [])[:3]
-                )
-                force_inst = (
-                    f"Mejora ÚNICAMENTE lo necesario para corregir: {errores_crit}. "
-                    "NO inventes datos. Preserva el contenido y la voz del estudiante."
-                )
-                force_razon = (
-                    f"Debate concluido. Ciclo {n_iter + 1}/{max_iter}: "
-                    f"Redactor corrige {n_errores} error(es)"
-                )
+        # ── El LLM decide el siguiente nodo ───────────────────────────────────
+        try:
+            respuesta = invocar_con_backoff(chain, llm_input)
+            siguiente = respuesta.content.strip().lower().strip(".,;:")
+            if siguiente not in NODOS_VALIDOS:
+                logger.warning(f"[Supervisor] LLM devolvió '{siguiente}' inválido → fallback")
+                siguiente = _fallback_routing(state)
             else:
-                # Debate aceptó todos los errores → Redactor aplica las correcciones al texto
-                force_inst = (
-                    "Aplica las correcciones propuestas en el debate al texto original. "
-                    "Produce el texto mejorado final. NO inventes datos."
-                )
-                force_razon = (
-                    "Debate resolvió todos los errores — Redactor genera el texto mejorado"
-                )
-            force = "redactor"
+                motivo_rechazo = _validar_decision_semantica(siguiente, state)
+                if motivo_rechazo:
+                    logger.warning(
+                        f"[Supervisor] LLM dijo '{siguiente}' pero es semánticamente inválido "
+                        f"({motivo_rechazo}) → fallback"
+                    )
+                    siguiente = _fallback_routing(state)
+                else:
+                    logger.info(f"[Supervisor] LLM decidió → {siguiente}")
+        except Exception as exc:
+            logger.warning(f"[Supervisor] LLM falló ({exc}) → fallback")
+            siguiente = _fallback_routing(state)
 
-        elif n_errores == 0 or n_iter >= max_iter:
-            # Fase 7 — FIN: sin errores o ciclos agotados → resultado automático
-            if n_errores == 0:
-                force_razon = (
-                    f"Texto sin errores bloqueantes "
-                    f"(puntaje {state.get('puntaje_estimado', 0)} pts) — proceso completado"
-                )
-                force_inst = "El texto cumple todos los ítems de la rúbrica. Resultado final generado."
-            else:
-                force_razon = f"Ciclos agotados ({n_iter}/{max_iter}) — resultado final con {n_errores} observaciones"
-                force_inst  = (
-                    f"Se completaron {n_iter} ciclo(s) de mejora. "
-                    f"Resultado entregado con {n_errores} observación(es) pendiente(s)."
-                )
-            force = "fin"
-
-        # ── Si hay una decisión determinista, devolverla sin llamar al LLM ─────
-        if force is not None:
-            logger.info(f"[Supervisor] Fase determinista → {force.upper()} | {force_razon}")
-            # Al enrutar al Redactor se cierra el ciclo: resetear todos los contadores de debate
-            extra = {
-                "ronda_debate": 0,
-                "debate_auditor_ronda": 0,
-                "debate_metodologo_ronda": 0,
-                "argumento_debate_auditor": "",
-            } if force == "redactor" else {}
-            return {
-                "siguiente_nodo":           force,
-                "instrucciones_supervisor": force_inst,
-                "plan_supervisor":          f"[{force.upper()}] {force_inst}",
-                "pasos_ejecutados":         pasos + 1,
-                **extra,
-            }
-
-        # ── Caso residual (no debería ocurrir en flujo normal) → LLM decide ────
-        texto_generado_str  = "SÍ" if state.get("texto_iterado") else "NO"
-        auditor_ok_str      = "SÍ" if auditor_ok else "NO"
-        metodologico_ok_str = "SÍ" if metodologico_ok else "NO"
-        consenso_ok_str     = "SÍ" if consenso_ok else "NO"
-        disenso_ok_str      = "SÍ" if disenso_ok else "NO"
-
-        decision: DecisionSupervisor = invocar_con_backoff(chain, {
-            "seccion":                   state["seccion_objetivo"],
-            "numero_iteracion":          n_iter,
-            "max_iteraciones":           max_iter,
-            "pasos_ejecutados":          pasos,
-            "max_pasos_red":             max_pasos,
-            "texto_generado":            texto_generado_str,
-            "auditor_ok":                auditor_ok_str,
-            "metodologico_ok":           metodologico_ok_str,
-            "consenso_ok":               consenso_ok_str,
-            "disenso_ok":                disenso_ok_str,
-            "n_errores":                 n_errores,
-            "ronda_debate":              ronda_debate,
-            "max_rondas_debate":         max_rondas,
-            "feedback_auditor":          state.get("feedback_auditor") or "Aún no disponible.",
-            "observaciones_metodologicas": state.get("observaciones_metodologicas") or "Aún no disponible.",
-            "resultado_consenso":        state.get("resultado_consenso") or "Sin análisis de consenso aún.",
-            "resultado_disenso":         state.get("resultado_disenso") or "Sin análisis de disenso aún.",
-            "historial_debate":          str(state.get("historial_debate") or []),
-            "plan_anterior":             state.get("plan_supervisor") or "Primera decisión del ciclo.",
-        })
-
-        logger.info(
-            f"[Supervisor] LLM decidió: {decision.siguiente.upper()} | {decision.razon[:80]}…"
-        )
-
-        siguiente = decision.siguiente
+        # ── Resetear estado de debate al enrutar al Redactor ─────────────────
+        # Permite que debate corra de nuevo en la siguiente iteración si hay errores.
         extra = {
-            "ronda_debate": 0,
-            "debate_auditor_ronda": 0,
-            "debate_metodologo_ronda": 0,
-            "argumento_debate_auditor": "",
+            "debate_completado": False,
+            "debate_memory":     [],
         } if siguiente == "redactor" else {}
+
         return {
             "siguiente_nodo":           siguiente,
-            "instrucciones_supervisor": decision.instrucciones,
-            "plan_supervisor":          f"[{siguiente.upper()}] {decision.instrucciones}",
+            "instrucciones_supervisor": f"LLM → {siguiente}",
+            "plan_supervisor":          f"[{siguiente.upper()}] decisión LLM",
             "pasos_ejecutados":         pasos + 1,
             **extra,
         }

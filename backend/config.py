@@ -9,6 +9,8 @@ Contiene:
 """
 
 import os
+import re
+import unicodedata
 
 # ── Paths de la biblioteca de libros ─────────────────────────────────────────
 # ChromaDB persistente: sobrevive reinicios del servidor
@@ -194,9 +196,81 @@ SECCIONES_TESIS: list[dict] = [
 ]
 
 
+_STOP_CFG = {
+    "de", "del", "la", "el", "los", "las", "un", "una", "y", "e", "o", "u",
+    "con", "en", "al", "para", "por", "que", "se", "su", "sus", "es", "son",
+    "a", "ante", "bajo", "desde", "sin", "sobre", "tras", "como",
+    # Palabras muy frecuentes en nombres de sección que no discriminan entre secciones
+    "estudio", "investigacion", "proyecto",
+}
+
+
+def _kw_seccion(texto: str) -> set[str]:
+    """Palabras significativas de un nombre de sección (sin números, acentos, ni stop words)."""
+    # Normalizar acentos: "método" → "metodo", "hipótesis" → "hipotesis"
+    sin_acentos = unicodedata.normalize('NFKD', texto).encode('ascii', 'ignore').decode('ascii')
+    tokens = re.sub(r'[\d\.\,\-–\(\)\[\]/]', ' ', sin_acentos.lower()).split()
+    return {t for t in tokens if len(t) > 2 and t not in _STOP_CFG}
+
+
+def _buscar_items_seccion(seccion: str) -> list[int]:
+    """
+    Busca los ítems de SECCION_ITEMS_MAP para una sección dada.
+
+    Estrategia en cascada:
+      1. Coincidencia exacta de nombre.
+      2. Prefijo numérico (ej. '1.1.1' → busca clave con prefijo '1.1.1').
+      3. Mayor overlap de palabras clave (para secciones de PDF con distinta numeración).
+    """
+    # 1. Exacta
+    direct = SECCION_ITEMS_MAP.get(seccion)
+    if direct:
+        return direct
+
+    # 2. Prefijo numérico exacto
+    m = re.match(r'^(\d[\d\.]*)', seccion.strip())
+    prefijo_num = m.group(1).rstrip('.') if m else None
+    if prefijo_num:
+        for k, items in SECCION_ITEMS_MAP.items():
+            m2 = re.match(r'^(\d[\d\.]*)', k.strip())
+            if m2 and m2.group(1).rstrip('.') == prefijo_num:
+                return items
+
+    # 3. Overlap de palabras clave con desempate Jaccard
+    #    Antes que el fallback por prefijo padre para preservar la semántica
+    #    (ej. "1.1.1 Formulación" → keywords llevan a "1.1.2 Problema central", no a "1.1")
+    kw = _kw_seccion(seccion)
+    if kw:
+        mejor_jaccard = 0.0
+        mejor_items: list[int] = []
+        for k, items in SECCION_ITEMS_MAP.items():
+            kw_k    = _kw_seccion(k)
+            inter   = len(kw & kw_k)
+            if inter == 0:
+                continue
+            union   = len(kw | kw_k)
+            jaccard = inter / union if union else 0.0
+            if jaccard > mejor_jaccard:
+                mejor_jaccard = jaccard
+                mejor_items   = items
+        if mejor_jaccard > 0:
+            return mejor_items
+
+    # 4. Prefijo padre como último recurso para subsecciones sin keywords únicas
+    #    (ej. "5.1 Cronograma" → "5 Aspectos administrativos")
+    if prefijo_num and '.' in prefijo_num:
+        padre = prefijo_num.rsplit('.', 1)[0]
+        for k, items in SECCION_ITEMS_MAP.items():
+            m2 = re.match(r'^(\d[\d\.]*)', k.strip())
+            if m2 and m2.group(1).rstrip('.') == padre:
+                return items
+
+    return []
+
+
 def get_items_texto_para_seccion(seccion: str) -> str:
-    """Genera la tabla de ítems relevantes para un sección, lista para inyectar en el prompt."""
-    items_nums = SECCION_ITEMS_MAP.get(seccion, list(RUBRICA_ITEMS_UPAO.keys()))
+    """Genera la tabla de ítems relevantes para una sección, lista para inyectar en el prompt."""
+    items_nums = _buscar_items_seccion(seccion) or list(RUBRICA_ITEMS_UPAO.keys())
     lineas = ["| N° | Ítem de la Rúbrica UPAO | Puntaje (0-3) |",
               "|----|-----------------------------|--------------|"]
     for num in items_nums:
@@ -207,7 +281,7 @@ def get_items_texto_para_seccion(seccion: str) -> str:
 
 def get_puntaje_maximo_seccion(seccion: str) -> int:
     """Puntaje máximo posible para la sección (nro. de ítems × 3)."""
-    return len(SECCION_ITEMS_MAP.get(seccion, [])) * 3
+    return len(_buscar_items_seccion(seccion)) * 3
 
 
 # ── Dependencias cruzadas entre secciones ────────────────────────────────────

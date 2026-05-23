@@ -13,8 +13,7 @@ DESTINOS_VALIDOS = {
     "redactor",
     "auditor",
     "metodologico",
-    "debate_auditor",    # Auditor argumenta → escribe al estado
-    "debate_metodologo", # Metodólogo lee del estado → emite veredicto
+    "debate",    # Panel de 4 subagentes con memoria compartida
     "consenso",
     "disenso",
     "fin",

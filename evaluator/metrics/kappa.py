@@ -52,15 +52,16 @@ def calcular_kappa(historial_debate: list[str]) -> dict:
     etiquetas_auditor    = [_clasificar_turno(turnos_auditor[i])    for i in range(min_turnos)]
     etiquetas_metodologo = [_clasificar_turno(turnos_metodologo[i]) for i in range(min_turnos)]
 
-    # Sin varianza en alguno de los dos → Kappa indefinido
+    # Sin varianza en alguno de los dos → Kappa indefinido (división por cero en la fórmula)
     if len(set(etiquetas_auditor)) == 1 or len(set(etiquetas_metodologo)) == 1:
-        acuerdo_total = etiquetas_auditor == etiquetas_metodologo
+        agente_sin_varianza = (
+            "auditor" if len(set(etiquetas_auditor)) == 1 else "metodólogo"
+        )
         return {
-            "kappa": 1.0 if acuerdo_total else 0.0,
+            "kappa": None,
             "nota": (
-                "acuerdo total entre agentes — sin varianza suficiente para Kappa robusto"
-                if acuerdo_total
-                else "desacuerdo total — debate muy polarizado"
+                f"Kappa indefinido — {agente_sin_varianza} clasificó todos los turnos igual "
+                f"(sin varianza). No aplica la fórmula de Cohen."
             ),
             "turnos_analizados": min_turnos,
             "detalle": {

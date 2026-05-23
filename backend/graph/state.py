@@ -10,14 +10,6 @@ class ErrorRubrica(TypedDict):
     descripcion:    str
 
 
-class RondaDebate(TypedDict):
-    ronda:                  int
-    argumento_auditor:      str   # Auditor defiende sus hallazgos de rúbrica
-    respuesta_metodologico: str   # Metodólogo evalúa y refuta/confirma
-    items_confirmados:      List[int]  # errores que ambos confirman como reales
-    items_descartados:      List[int]  # errores que el Metodólogo desestima
-
-
 class MentoriaState(TypedDict):
     # ── Input desde Streamlit ─────────────────────────────────────────────────
     seccion_objetivo:       str
@@ -30,7 +22,6 @@ class MentoriaState(TypedDict):
 
     # ── Configuración del ciclo ───────────────────────────────────────────────
     max_iteraciones:        int
-    max_rondas_debate:      int
 
     # ── Supervisor ────────────────────────────────────────────────────────────
     plan_supervisor:        str
@@ -53,14 +44,11 @@ class MentoriaState(TypedDict):
     iter_consenso:          int   # iteración en que corrió el nodo consenso
     iter_disenso:           int   # iteración en que corrió el nodo disenso
 
-    # ── Debate inter-agente (Auditor y Metodólogo como nodos separados) ──────────
-    ronda_debate:              int
-    historial_debate:          List[RondaDebate]
-    # Canal de comunicación entre nodos de debate — el Auditor escribe aquí,
-    # el Metodólogo lee desde el estado (no se pasa como parámetro de función).
-    argumento_debate_auditor:  str
-    debate_auditor_ronda:      int   # ronda en que el Auditor argumentó por última vez
-    debate_metodologo_ronda:   int   # ronda en que el Metodólogo respondió por última vez
+    # ── Debate — panel de 4 subagentes con memoria compartida ────────────────
+    debate_memory:          list          # historial del panel: [{"subagente": str, "contenido": str}, ...]
+    debate_veredicto:       Optional[Dict]  # output estructurado del sintetizador
+    debate_completado:      bool          # True tras ejecutar el nodo debate en la iteración actual
+    historial_debate:       list          # registro acumulado de sesiones de debate (compatible exportador)
 
     # ── Red multiagente — routing dinámico del Supervisor ────────────────────
     siguiente_nodo:           str
@@ -75,18 +63,24 @@ class MentoriaState(TypedDict):
     # ── Metadata ─────────────────────────────────────────────────────────────
     _puntaje_max:             Optional[int]
 
-    # ── Identidad institucional (CAMBIO 4 — ContextLoader) ───────────────────
+    # ── Identidad institucional ───────────────────────────────────────────────
     universidad:              str   # "upao" por defecto; cualquier universidad
     programa:                 str   # "ingeniería de sistemas"
     modalidad:                str   # "tesis"
 
-    # ── Trazabilidad de ejecución (CAMBIO 1 — exportador) ────────────────────
+    # ── Trazabilidad de ejecución ─────────────────────────────────────────────
     run_id:                   str   # UUID generado al inicio del flujo
     puntaje_inicial:          Optional[float]  # score antes de la primera iteración
 
-    # ── Consenso matemático global (CAMBIO 5 — nodo_consenso) ────────────────
+    # ── Consenso matemático global ────────────────────────────────────────────
     consenso_matematico:      Optional[Dict]
 
-    # ── Panel de subagentes auditor (CAMBIO 6) ────────────────────────────────
+    # ── Panel de subagentes auditor ───────────────────────────────────────────
     scores_subagentes:        Optional[List]   # scores de cada subagente
     consenso_matematico_auditor: Optional[Dict]
+
+    # ── Trazabilidad LoRA + MCP (subagentes por nodo) ─────────────────────────
+    loras_activas:            Optional[List]   # IDs de LoRAs del último nodo ejecutado
+
+    # ── Exportador — rutas de archivos generados ──────────────────────────────
+    rutas_reportes:           Optional[List]   # paths a run_*.json, debate_*.md, eval_*.json
