@@ -1,11 +1,3 @@
-"""
-Parser de rúbricas de evaluación en PDF.
-
-Extrae ítems, secciones, escala de puntuación y tabla vigesimal
-de una rúbrica en formato PDF (compatible con formato UPAO y similares).
-El sistema usa este módulo cuando el estudiante sube su propia rúbrica;
-de lo contrario, usa la rúbrica UPAO hardcodeada en config.py.
-"""
 
 import re
 import io
@@ -18,17 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 def parse_rubrica_pdf(pdf_bytes: bytes) -> Optional[dict]:
-    """
-    Parsea una rúbrica desde PDF y devuelve su estructura.
 
-    Intenta primero extracción por tabla (pdfplumber); si falla,
-    usa parseo por texto con regex.
-
-    Returns:
-        dict con: items, secciones, escala, tabla_vigesimal,
-                  total_items, puntaje_maximo, texto_raw
-        None si el PDF no puede parsearse como rúbrica válida.
-    """
     try:
         texto = _extraer_texto(pdf_bytes)
         items = _extraer_items_tabla(pdf_bytes)

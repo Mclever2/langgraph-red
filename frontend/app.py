@@ -1,24 +1,3 @@
-"""
-PoC #2 (v3 — modularizada) — Sistema Multiagente de Mentoría Académica
-=======================================================================
-Stack: LangGraph · Groq (llama-3.3-70b-versatile) · ChromaDB · HuggingFace · Streamlit
-
-Punto de entrada minimal: configura la página, inicializa la sesión
-y delega el renderizado a los módulos de componentes.
-
-Estructura del proyecto:
-  frontend/
-    app.py                          ← este archivo (router principal)
-    resources.py                    ← singletons @st.cache_resource
-    session_manager.py              ← session_state helpers
-    components/
-      sidebar.py                    ← sidebar + biblioteca metodológica
-      pantalla_upload.py            ← Pantalla 1: carga y vectorización del PDF
-      pantalla_seleccion.py         ← Pantalla 2: selección de sección + inicio del grafo
-      pantalla_revision.py          ← Pantalla 3: revisión HITL del mentor
-      pantalla_resultado.py         ← Pantalla 4: resultado final aprobado
-"""
-
 import sys
 import os
 import logging
@@ -35,7 +14,10 @@ from frontend.components.pantalla_seleccion import render_pantalla_seleccion
 from frontend.components.pantalla_revision  import render_pantalla_revision
 from frontend.components.pantalla_resultado import render_pantalla_resultado
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+)
 
 # ── Configuración de la página ────────────────────────────────────────────────
 st.set_page_config(

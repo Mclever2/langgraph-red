@@ -84,3 +84,10 @@ class MentoriaState(TypedDict):
 
     # ── Exportador — rutas de archivos generados ──────────────────────────────
     rutas_reportes:           Optional[List]   # paths a run_*.json, debate_*.md, eval_*.json
+
+    # ── Flags de ejecución por iteración ─────────────────────────────────────
+    consenso_ejecutado:       Optional[bool]
+    disenso_ejecutado:        Optional[bool]
+    auditor_ejecutado:        Optional[bool]
+    metodologo_ejecutado:     Optional[bool]
+    debate_ejecutado:         Optional[bool]

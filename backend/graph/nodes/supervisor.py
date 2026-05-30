@@ -23,6 +23,7 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from ..state import MentoriaState
 from ._utils import cargar_prompt, invocar_con_backoff
+from config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -41,30 +42,45 @@ def _fallback_routing(state: MentoriaState) -> str:
     max_iter      = state.get("max_iteraciones", 3)
     n_errores     = len(state.get("errores_rubrica") or [])
     pasos         = state.get("pasos_ejecutados", 0)
-    max_pasos     = state.get("max_pasos_red", 40)
-    iter_auditada = state.get("iter_auditada", 0)
+    max_pasos     = state.get("max_pasos_red") or Config.get_max_pasos(max_iter)
 
     if pasos >= max_pasos:
         return "fin"
-    if not iter_auditada:
+    if not state.get("auditor_ejecutado", False):
         return "auditor"
-    if not state.get("iter_metodologica"):
+    if not state.get("metodologo_ejecutado", False):
         return "metodologico"
-    if not state.get("iter_consenso"):
+    if not state.get("consenso_ejecutado", False):
         return "consenso"
-    if not state.get("iter_disenso"):
+    if not state.get("disenso_ejecutado", False):
         return "disenso"
     # El debate solo se vuelve a correr si aún quedan iteraciones por hacer.
     # Cuando n_iter >= max_iter solo necesitamos la auditoría final del texto.
-    if n_errores > 0 and not state.get("debate_completado", False) and n_iter < max_iter:
+    if n_errores > 0 and not state.get("debate_ejecutado", False) and n_iter < max_iter:
         return "debate"
     if state.get("texto_iterado") is None or (n_errores > 0 and n_iter < max_iter):
         return "redactor"
     # Tras la reescritura del Redactor, el Auditor debe evaluar el texto mejorado
-    # antes de poder terminar (iter_auditada <= n_iter significa que el Auditor
-    # aún no evaluó la última versión del texto).
-    if state.get("texto_iterado") and iter_auditada <= n_iter:
+    # antes de poder terminar (si no ha sido auditado en esta iteración).
+    if state.get("texto_iterado") and not state.get("auditor_ejecutado", False):
         return "auditor"
+
+    # FIX 2: Fallback determinista termina el grafo antes de tiempo
+    if n_errores == 0:
+        consenso_ejecutado = state.get("consenso_ejecutado", False)
+        disenso_ejecutado = state.get("disenso_ejecutado", False)
+        # Solo exportar si ya completamos todas las iteraciones
+        # o si ya corrieron consenso y disenso en esta iteración
+        if n_iter >= max_iter or (consenso_ejecutado and disenso_ejecutado):
+            return "fin"
+        else:
+            # Aún hay iteraciones, ir a consenso/disenso/redactor según flags
+            if not consenso_ejecutado:
+                return "consenso"
+            if not disenso_ejecutado:
+                return "disenso"
+            return "redactor"
+
     return "fin"
 
 
@@ -77,20 +93,15 @@ def _validar_decision_semantica(siguiente: str, state: MentoriaState) -> str | N
     max_iter  = state.get("max_iteraciones", 3)
     n_errores = len(state.get("errores_rubrica") or [])
 
-    iter_auditada     = state.get("iter_auditada", 0)
-    iter_metodologica = state.get("iter_metodologica", 0)
-    iter_consenso     = state.get("iter_consenso", 0)
-    iter_disenso      = state.get("iter_disenso", 0)
-    debate_completado = state.get("debate_completado", False)
-
-    auditor_ok      = iter_auditada > n_iter
-    metodologico_ok = iter_metodologica > n_iter
-    consenso_ok     = iter_consenso > n_iter
-    disenso_ok      = iter_disenso > n_iter
+    auditor_ok      = state.get("auditor_ejecutado", False)
+    metodologico_ok = state.get("metodologo_ejecutado", False)
+    consenso_ok     = state.get("consenso_ejecutado", False)
+    disenso_ok      = state.get("disenso_ejecutado", False)
+    debate_completado = state.get("debate_ejecutado", False)
 
     # Ciclo completo: ya se generó texto y se alcanzó el máximo de iteraciones.
     # Excepción: permitir UNA pasada final del Auditor sobre el texto reescrito
-    # (iter_auditada <= n_iter significa que el Auditor aún no evaluó esta versión).
+    # (si aún no se ha auditado esta iteración).
     if n_iter >= max_iter and state.get("texto_iterado") and siguiente != "fin":
         if siguiente == "auditor" and not auditor_ok:
             return None  # auditoría final del texto mejorado — válida
@@ -145,21 +156,16 @@ def make_nodo_supervisor(llm: ChatOpenAI):
 
     def nodo_supervisor(state: MentoriaState) -> dict:
         pasos     = state.get("pasos_ejecutados", 0)
-        max_pasos = state.get("max_pasos_red", 30)
         n_iter    = state.get("numero_iteracion", 0)
         max_iter  = state.get("max_iteraciones", 3)
+        max_pasos = state.get("max_pasos_red") or Config.get_max_pasos(max_iter)
         n_errores = len(state.get("errores_rubrica") or [])
 
-        iter_auditada     = state.get("iter_auditada", 0)
-        iter_metodologica = state.get("iter_metodologica", 0)
-        iter_consenso     = state.get("iter_consenso", 0)
-        iter_disenso      = state.get("iter_disenso", 0)
-        debate_completado = state.get("debate_completado", False)
-
-        auditor_ok      = iter_auditada > n_iter
-        metodologico_ok = iter_metodologica > n_iter
-        consenso_ok     = iter_consenso > n_iter
-        disenso_ok      = iter_disenso > n_iter
+        auditor_ok      = state.get("auditor_ejecutado", False)
+        metodologico_ok = state.get("metodologo_ejecutado", False)
+        consenso_ok     = state.get("consenso_ejecutado", False)
+        disenso_ok      = state.get("disenso_ejecutado", False)
+        debate_completado = state.get("debate_ejecutado", False)
 
         logger.info(
             f"[Supervisor] Paso {pasos + 1}/{max_pasos} | "
@@ -220,9 +226,9 @@ def make_nodo_supervisor(llm: ChatOpenAI):
             else:
                 motivo_rechazo = _validar_decision_semantica(siguiente, state)
                 if motivo_rechazo:
-                    logger.warning(
-                        f"[Supervisor] LLM dijo '{siguiente}' pero es semánticamente inválido "
-                        f"({motivo_rechazo}) → fallback"
+                    logger.info(
+                        f"[Supervisor] LLM dijo '{siguiente}' → inválido "
+                        f"({motivo_rechazo}) → fallback determinista"
                     )
                     siguiente = _fallback_routing(state)
                 else:
@@ -231,11 +237,16 @@ def make_nodo_supervisor(llm: ChatOpenAI):
             logger.warning(f"[Supervisor] LLM falló ({exc}) → fallback")
             siguiente = _fallback_routing(state)
 
-        # ── Resetear estado de debate al enrutar al Redactor ─────────────────
-        # Permite que debate corra de nuevo en la siguiente iteración si hay errores.
+        # ── Resetear estado de debate y flags de ejecución al enrutar al Redactor ──
+        # Permite que debate y los evaluadores corran de nuevo en la siguiente iteración si hay errores.
         extra = {
             "debate_completado": False,
             "debate_memory":     [],
+            "consenso_ejecutado": False,
+            "disenso_ejecutado": False,
+            "auditor_ejecutado": False,
+            "metodologo_ejecutado": False,
+            "debate_ejecutado": False,
         } if siguiente == "redactor" else {}
 
         return {

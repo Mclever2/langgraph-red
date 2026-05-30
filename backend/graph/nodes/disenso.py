@@ -89,7 +89,8 @@ def make_nodo_disenso(llm: ChatOpenAI):
                 api_key=os.getenv("OPENAI_API_KEY", ""),
                 model=model_name,
                 temperature=lora.temperatura,
-                max_retries=2,
+                max_retries=3,
+                timeout=600.0,
             )
 
             system_prompt = lora.system_prompt_completo(prompt_base)
@@ -138,6 +139,7 @@ def make_nodo_disenso(llm: ChatOpenAI):
             "resultado_disenso": resultado_disenso,
             "iter_disenso":      n_iter + 1,
             "loras_activas":     loras_usadas,
+            "disenso_ejecutado":  True,
         }
 
     return nodo_disenso

@@ -1,13 +1,3 @@
-"""
-Pantalla 4 — Resultado final aprobado.
-
-Layout en pestañas:
-  · Evaluación   — score, feedback del auditor, observaciones, recomendaciones
-  · Debate       — historial de rondas, consenso y disenso
-  · Contexto RAG — fragmentos del PDF y de libros (por separado)
-  · Reportes     — métricas NLP y descarga de archivos
-"""
-
 import os
 import json
 import re
@@ -37,11 +27,19 @@ def render_pantalla_resultado() -> None:
         else:
             pts_max = _buscar_pts_max(seccion)
 
+    pts_ratio = (float(pts) / float(pts_max)) if (pts and pts_max and float(pts_max) > 0) else 0.0
+
     st.title("Mentoría Completada")
-    st.success(
-        f"El texto de la sección **{seccion}** fue **aprobado** "
-        f"tras **{n_iter} iteración(es)** automática(s)."
-    )
+    if pts_ratio >= 0.50:
+        st.success(
+            f"El texto de la sección **{seccion}** fue **aprobado** "
+            f"tras **{n_iter} iteración(es)** automática(s)."
+        )
+    else:
+        st.warning(
+            f"El ciclo de revisión de **{seccion}** finalizó tras **{n_iter} iteración(es)**. "
+            f"Puntaje: **{int(float(pts)) if pts else '?'}/{pts_max}** — el texto requiere mejoras significativas."
+        )
 
     _render_metricas_finales(n_iter, max_iter, pts, pts_max, rubrica)
     st.divider()
@@ -111,16 +109,24 @@ def _render_metricas_finales(n_iter: int, max_iter: int, pts, pts_max: int, rubr
 # ── Tab 1: Evaluación ─────────────────────────────────────────────────────────
 
 def _render_tab_evaluacion(v: dict, seccion: str, rubrica, pts, pts_max: int) -> None:
+    pts_ratio = (float(pts) / float(pts_max)) if (pts and pts_max and float(pts_max) > 0) else 0.0
+
     # Texto aprobado
-    texto_final = v.get("texto_iterado") or ""
-    texto_origen = "mejorado por el Redactor"
-    if not texto_final:
-        texto_origen = "contexto original del PDF (sin iteración del Redactor)"
+    texto_iterado = v.get("texto_iterado") or ""
+    texto_final = texto_iterado if texto_iterado.strip() else (v.get("contexto_recuperado") or "")
+    n_iter = v.get("numero_iteracion", 0)
 
     st.subheader(f"Texto Final — {seccion}")
     if texto_final:
+        if texto_iterado.strip():
+            if n_iter > 0:
+                st.caption("Texto generado por el Redactor automático.")
+            else:
+                st.caption("Contexto original del PDF (el Redactor no fue necesario).")
+        else:
+            st.caption(f"📄 Texto original — aprobado sin modificaciones (Puntaje: {int(float(pts)) if pts else '?'}/{pts_max})")
         st.code(texto_final, language=None)
-        st.caption("Usa el ícono de copia para exportar el texto aprobado.")
+        st.caption("Usa el ícono de copia para exportar el texto.")
         if "[COMPLETAR:" in texto_final:
             st.warning(
                 "El texto contiene `[COMPLETAR: …]`. "
@@ -128,8 +134,8 @@ def _render_tab_evaluacion(v: dict, seccion: str, rubrica, pts, pts_max: int) ->
             )
     else:
         st.info(
-            "El texto fue aprobado en la primera evaluación sin necesidad de "
-            "reescritura automática. El contexto recuperado del PDF fue evaluado directamente."
+            "El texto fue evaluado en la primera pasada sin reescritura automática. "
+            "El contexto recuperado del PDF fue evaluado directamente."
         )
 
     st.divider()
@@ -141,20 +147,22 @@ def _render_tab_evaluacion(v: dict, seccion: str, rubrica, pts, pts_max: int) ->
 
     # Qué haría el Redactor (si hubiera iterado)
     with st.expander("💡 ¿Qué recomendaría el Redactor?", expanded=False):
-        st.markdown(
-            "El Redactor aplicaría las correcciones indicadas en el feedback anterior. "
-            "Si el texto ya fue aprobado en la primera pasada, a continuación se muestran "
-            "las **ideas de mejora** aunque no sean bloqueantes:"
-        )
         errores = v.get("errores_rubrica", [])
         if errores:
+            st.markdown("El Redactor aplicaría las siguientes correcciones:")
             for err in errores:
                 st.markdown(
                     f"- **Ítem {err['item_numero']:02d}** "
                     f"(puntaje actual={err['puntaje_actual']}): {err['descripcion']}"
                 )
+        elif pts_ratio < 0.50:
+            st.warning(
+                "El puntaje es bajo pero el panel de auditores no alcanzó consenso sobre "
+                "errores específicos. Revisa el **Feedback del Auditor** y las "
+                "**Recomendaciones generales** para orientación de mejora."
+            )
         else:
-            st.success("No se detectaron observaciones de mejora en la rúbrica.")
+            st.success("No se detectaron observaciones de mejora bloqueantes en la rúbrica.")
 
     st.divider()
 
@@ -162,6 +170,12 @@ def _render_tab_evaluacion(v: dict, seccion: str, rubrica, pts, pts_max: int) ->
     errores_finales = v.get("errores_rubrica", [])
     if errores_finales:
         _render_observaciones(errores_finales, rubrica)
+    elif pts_ratio < 0.50:
+        st.warning(
+            f"Puntaje final: **{int(float(pts)) if pts else '?'}/{pts_max}**. "
+            "No se consolidaron errores específicos con consenso del panel, pero el texto "
+            "requiere mejoras significativas. Consulta el feedback del Auditor y el Metodólogo."
+        )
     else:
         tipo = "la rúbrica personalizada" if rubrica else "la rúbrica UPAO"
         st.success(f"El texto cumple todos los ítems evaluados de {tipo}.")
@@ -399,16 +413,20 @@ def _render_reportes_descarga(v: dict) -> None:
             metricas = datos.get("metricas", {})
             if metricas:
                 st.markdown("#### Métricas NLP del Proceso")
-                col1, col2, col3, col4 = st.columns(4)
-                col1.metric("ROUGE-1 F",        f"{metricas.get('rouge1_f', 0):.4f}")
-                col2.metric("ROUGE-2 F",        f"{metricas.get('rouge2_f', 0):.4f}")
-                col3.metric("ROUGE-L F",        f"{metricas.get('rougeL_f', 0):.4f}")
-                col4.metric("BLEU",             f"{metricas.get('bleu_score', 0):.4f}")
-                col5, col6, col7 = st.columns(3)
-                col5.metric("Similitud Coseno", f"{metricas.get('similitud_coseno', 0):.4f}")
-                kv = metricas.get("kappa")
-                col6.metric("Kappa",            f"{kv:.4f}" if kv is not None else "N/A")
-                col7.metric("Gain Score",       f"{metricas.get('gain_score', 0):.4f}")
+                if metricas.get("sin_reescritura"):
+                    # Mostrar badge verde con texto explicativo
+                    st.success("✅ Texto aprobado sin reescritura — métricas NLP no aplican")
+                else:
+                    col1, col2, col3, col4 = st.columns(4)
+                    col1.metric("ROUGE-1 F",        f"{metricas.get('rouge1_f', 0):.4f}")
+                    col2.metric("ROUGE-2 F",        f"{metricas.get('rouge2_f', 0):.4f}")
+                    col3.metric("ROUGE-L F",        f"{metricas.get('rougeL_f', 0):.4f}")
+                    col4.metric("BLEU",             f"{metricas.get('bleu_score', 0):.4f}")
+                    col5, col6, col7 = st.columns(3)
+                    col5.metric("Similitud Coseno", f"{metricas.get('similitud_coseno', 0):.4f}")
+                    kv = metricas.get("kappa")
+                    col6.metric("Kappa",            f"{kv:.4f}" if kv is not None else "N/A")
+                    col7.metric("Gain Score",       f"{metricas.get('gain_score', 0):.4f}")
                 st.divider()
         except Exception:
             pass

@@ -1,15 +1,3 @@
-"""
-Modelo de embeddings local HuggingFace para RAG multilingüe.
-
-Modelo: intfloat/multilingual-e5-small
-  - Tamaño: ~117 MB (descarga única, caché en ~/.cache/huggingface/hub/)
-  - Idiomas: 100+ incluyendo español
-  - Rendimiento: supera a all-MiniLM-L6-v2 en texto académico español (MTEB)
-  - Dimensiones: 384 (mismo que el modelo anterior)
-  - Requiere prefijos: "query: " para consultas, "passage: " para documentos
-
-Referencia: Wang et al. (2022) - Text Embeddings by Weakly-Supervised Contrastive Pre-training
-"""
 
 import logging
 

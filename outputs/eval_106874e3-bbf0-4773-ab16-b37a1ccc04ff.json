@@ -1,0 +1,29 @@
+{
+  "run_id": "106874e3-bbf0-4773-ab16-b37a1ccc04ff",
+  "arquitectura": "langgraph-hub-spoke",
+  "universidad": "upao",
+  "metricas": {
+    "rouge1_f": 0.8303,
+    "rouge2_f": 0.7469,
+    "rougeL_f": 0.7945,
+    "bleu_score": 0.6702,
+    "similitud_coseno": 0.9407,
+    "interpretacion": "mejora baja o sin mejora",
+    "kappa": null,
+    "nota": "Kappa indefinido — auditor clasificó todos los turnos igual (sin varianza). No aplica la fórmula de Cohen.",
+    "turnos_analizados": 2,
+    "detalle": {
+      "etiquetas_auditor": [
+        0,
+        0
+      ],
+      "etiquetas_metodologo": [
+        1,
+        1
+      ]
+    },
+    "gain_score": 0.0,
+    "puntaje_inicial": 5.0,
+    "puntaje_final": 1.0
+  }
+}

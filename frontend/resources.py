@@ -1,11 +1,3 @@
-"""
-Singletons cacheados con @st.cache_resource.
-
-Garantiza que el modelo de embeddings, el grafo LangGraph y la biblioteca
-persistente se carguen UNA SOLA VEZ por sesión del servidor Streamlit,
-independientemente de cuántos reruns ocurran.
-"""
-
 import logging
 
 import streamlit as st

@@ -1,9 +1,4 @@
-"""
-ChromaDB persistente para la biblioteca de libros de metodología.
 
-Ciclo de vida: persiste en disco entre sesiones y reinicios del servidor.
-Responsabilidad única: gestionar los libros de referencia teórica.
-"""
 
 import os
 import logging
@@ -28,12 +23,7 @@ _K_LIBROS        = 3
 # ── Carga / creación ──────────────────────────────────────────────────────────
 
 def cargar_o_crear_biblioteca(embeddings: HuggingFaceEmbeddings) -> Chroma:
-    """
-    Carga la biblioteca persistente existente o crea una nueva vacía.
-    PersistentClient → los datos se guardan en LIBRARY_CHROMA_PATH (disco).
 
-    Llamar con @st.cache_resource para compartir la instancia entre reruns.
-    """
     os.makedirs(LIBRARY_CHROMA_PATH, exist_ok=True)
     cliente = chromadb.PersistentClient(path=LIBRARY_CHROMA_PATH)
     store = Chroma(
@@ -53,12 +43,7 @@ def agregar_libro(
     pdf_bytes: bytes,
     nombre_libro: str,
 ) -> int:
-    """
-    Vectoriza un PDF y lo agrega a la biblioteca persistente.
 
-    Returns:
-        Número de fragmentos indexados.
-    """
     paginas_contenido, _ = extraer_contenido_sin_indice(pdf_bytes)
     if not paginas_contenido:
         raise ValueError(f"El PDF '{nombre_libro}' está vacío o no tiene texto seleccionable.")
@@ -77,12 +62,7 @@ def agregar_libro(
 
 
 def listar_libros(vs_libros: Chroma) -> List[dict]:
-    """
-    Lista los libros únicos con su conteo de fragmentos.
 
-    Returns:
-        Lista de dicts: [{"nombre": str, "fragmentos": int}, ...]
-    """
     try:
         resultado = vs_libros._collection.get(include=["metadatas"])
         conteo: dict = {}
@@ -97,12 +77,7 @@ def listar_libros(vs_libros: Chroma) -> List[dict]:
 
 
 def eliminar_libro(vs_libros: Chroma, nombre_libro: str) -> int:
-    """
-    Elimina todos los fragmentos de un libro.
 
-    Returns:
-        Número de fragmentos eliminados.
-    """
     try:
         col = vs_libros._collection
         res = col.get(where={"fuente": nombre_libro}, include=["metadatas"])
@@ -122,13 +97,7 @@ def precargar_libros_desde_carpeta(
     vs_libros: Chroma,
     libros_ya_cargados: List[str],
 ) -> List[str]:
-    """
-    Lee todos los PDFs de BOOKS_PRELOAD_DIR e indexa los que no estén ya cargados.
-    Evita duplicados comparando con la lista de libros existentes.
 
-    Returns:
-        Nombres de libros recién indexados.
-    """
     if not os.path.isdir(BOOKS_PRELOAD_DIR):
         os.makedirs(BOOKS_PRELOAD_DIR, exist_ok=True)
         return []
@@ -160,10 +129,7 @@ def recuperar_contexto_teorico(
     seccion: str,
     k: int = _K_LIBROS,
 ) -> str:
-    """
-    Recupera fragmentos teóricos relevantes de la biblioteca para una sección.
-    Retorna "" si la biblioteca está vacía (el sistema funciona sin libros).
-    """
+
     try:
         n_total = vs_libros._collection.count()
         if n_total == 0:

@@ -316,6 +316,7 @@ def make_nodo_debate(llm_auditor: ChatOpenAI, llm_metodologico: ChatOpenAI):
             "debate_completado": True,
             "errores_rubrica":   errores_actualizados,
             "historial_debate":  historial,
+            "debate_ejecutado":  True,
         }
 
     return nodo_debate

@@ -64,6 +64,7 @@ def make_nodo_consenso(llm: ChatOpenAI):
             "resultado_consenso": resultado,
             "iter_consenso":      n_iter + 1,
             "consenso_matematico": consenso_mat,
+            "consenso_ejecutado": True,
         }
 
     return nodo_consenso

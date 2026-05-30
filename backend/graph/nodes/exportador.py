@@ -138,9 +138,39 @@ def make_nodo_exportador():
         try:
             from evaluator.evaluator import evaluar_desde_archivo
             from evaluator.report import guardar_reporte
-            evaluar_desde_archivo(str(ruta))
-            ruta_eval    = _OUTPUTS_DIR / f"eval_{run_id}.json"
-            ruta_reporte = guardar_reporte(str(ruta_eval))
+            
+            texto_final = state.get("texto_iterado") or ""
+            hubo_reescritura = bool(texto_final.strip())
+            
+            if not hubo_reescritura:
+                # Si no hay reescritura, guardamos directamente el archivo eval con None y sin_reescritura=True
+                resultado_eval = {
+                    "run_id": run_id,
+                    "arquitectura": "langgraph-hub-spoke",
+                    "universidad": state.get("universidad", ""),
+                    "metricas": {
+                        "rouge1": None,
+                        "rouge2": None, 
+                        "rougeL": None,
+                        "bleu": None,
+                        "similitud_coseno": None,
+                        "gain_score": None,
+                        "sin_reescritura": True
+                    }
+                }
+                ruta_eval = _OUTPUTS_DIR / f"eval_{run_id}.json"
+                with open(ruta_eval, "w", encoding="utf-8") as f:
+                    json.dump(resultado_eval, f, ensure_ascii=False, indent=2)
+                
+                # También guardar un reporte markdown simple
+                ruta_reporte = _OUTPUTS_DIR / f"eval_{run_id}_reporte.md"
+                with open(ruta_reporte, "w", encoding="utf-8") as f:
+                    f.write("# Reporte de Evaluación Académica\n\nEl texto fue aprobado en la primera pasada sin reescritura. Las métricas NLP no aplican.")
+            else:
+                evaluar_desde_archivo(str(ruta))
+                ruta_eval    = _OUTPUTS_DIR / f"eval_{run_id}.json"
+                ruta_reporte = guardar_reporte(str(ruta_eval))
+                
             logger.info(f"[Exportador] Métricas en {ruta_eval} | Reporte en {ruta_reporte}")
         except Exception as exc:
             logger.warning(f"[Exportador] No se pudieron generar métricas NLP: {exc}")

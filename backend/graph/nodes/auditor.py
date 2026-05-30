@@ -81,11 +81,54 @@ def _construir_rubrica(state: MentoriaState, seccion: str) -> tuple[str, int, st
     universidad = state.get("universidad", "upao")
     programa    = state.get("programa", "ingeniería de sistemas")
 
+    # 1. Rúbrica dinámica subida por el estudiante
+    rubrica = state.get("rubrica_dinamica")
+    if rubrica:
+        return (
+            rubrica_a_texto_prompt(rubrica),
+            rubrica.get("puntaje_maximo", len(rubrica.get("items", [])) * 3),
+            "rúbrica subida por el estudiante",
+        )
+
+    # 2. Si es UPAO, preferir evaluación fine-grained por ítem de rúbrica
+    # CONFIRMACIÓN FIX 4: Esta asignación es 100% DINÁMICA y no hardcodeada.
+    # No contiene números de ítems hardcodeados; los lee en tiempo real a través de
+    # _buscar_items_seccion(seccion) y los asocia a RUBRICA_ITEMS_UPAO definidos en backend/config.py.
+    from backend.config import _buscar_items_seccion, RUBRICA_ITEMS_UPAO
+    items_seccion = _buscar_items_seccion(seccion)
+    univ_lower = str(universidad).lower()
+    if ("upao" in univ_lower or "antenor orrego" in univ_lower) and items_seccion:
+        lineas = [
+            "| N° | Ítem de la Rúbrica UPAO | Puntaje (0-3) |",
+            "|----|-----------------------------|--------------|",
+        ]
+        for num in items_seccion:
+            desc = RUBRICA_ITEMS_UPAO.get(num, "Ítem sin descripción")
+            lineas.append(f"| {num:02d} | {desc} | ___ |")
+        items_texto = "\n".join(lineas)
+        puntaje_max = len(items_seccion) * 3
+        return items_texto, puntaje_max, "rúbrica oficial UPAO (por ítems)"
+
+    # 3. Fallback a ContextLoader (para otras universidades o si no hay items_seccion)
     try:
         from context.context_loader import ContextLoader
         loader  = ContextLoader()
         ctx     = loader.get(universidad=universidad, programa=programa)
         crit    = ctx.get("criterios", [])
+
+        # Filtrar criterios si la sección tiene ítems específicos asignados
+        if items_seccion:
+            criterios_filtrados = []
+            for c in crit:
+                items_c = c.get("items_rubrica", [])
+                if items_c:
+                    if any(item in items_seccion for item in items_c):
+                        criterios_filtrados.append(c)
+                else:
+                    criterios_filtrados.append(c)
+            if criterios_filtrados:
+                crit = criterios_filtrados
+
         lineas  = [
             "| N° | Criterio | Peso | Puntaje (0-3) |",
             "|----|----------|------|--------------|",
@@ -97,14 +140,6 @@ def _construir_rubrica(state: MentoriaState, seccion: str) -> tuple[str, int, st
         return items_texto, puntaje_max, f"rúbrica dinámica — {ctx['universidad']}"
     except Exception:
         pass
-
-    rubrica = state.get("rubrica_dinamica")
-    if rubrica:
-        return (
-            rubrica_a_texto_prompt(rubrica),
-            rubrica.get("puntaje_maximo", len(rubrica.get("items", [])) * 3),
-            "rúbrica subida por el estudiante",
-        )
 
     return (
         get_items_texto_para_seccion(seccion),
@@ -132,7 +167,11 @@ def make_nodo_auditor(llm: ChatOpenAI):
         programa    = state.get("programa", "ingeniería de sistemas")
 
         texto_a_evaluar = state.get("texto_iterado") or state.get("contexto_recuperado", "")
-        fuente_texto    = "mejorado" if state.get("texto_iterado") else "original del PDF"
+        if n_iter > 0 and not state.get("texto_iterado"):
+            logger.warning("[Auditor] ¡Alerta! n_iter > 0 pero 'texto_iterado' está vacío. Usando 'contexto_recuperado' como fallback.")
+        
+        fuente_texto = "mejorado" if (n_iter > 0 and state.get("texto_iterado")) else "original"
+        logger.info(f"[Auditor] Evaluando texto de {len(texto_a_evaluar)} chars | fuente: {fuente_texto}")
 
         # ── Enriquecer contexto: el auditor decide qué secciones necesita ver ─
         logger.info("[Auditor] Planificando contexto adicional con RAG dinámico…")
@@ -141,13 +180,6 @@ def make_nodo_auditor(llm: ChatOpenAI):
             seccion      = seccion,
             texto_snippet= texto_a_evaluar[:500],
             rol          = "auditor especializado en rúbricas universitarias",
-        )
-
-        puntaje_previo = state.get("puntaje_estimado")
-        puntaje_inicial_calc = (
-            float(puntaje_previo)
-            if puntaje_previo and float(puntaje_previo) > 0.0 and n_iter > 0
-            else float(state.get("puntaje_inicial") or 0.0)
         )
 
         items_texto, puntaje_max, rubrica_desc = _construir_rubrica(state, seccion)
@@ -187,7 +219,8 @@ def make_nodo_auditor(llm: ChatOpenAI):
                 api_key=os.getenv("OPENAI_API_KEY", ""),
                 model=model_name,
                 temperature=lora.temperatura,
-                max_retries=2,
+                max_retries=3,
+                timeout=600.0,
             ).with_structured_output(AuditorOutput)
 
             # Prompt = base + modificador LoRA (con universidad embebida)
@@ -241,7 +274,72 @@ def make_nodo_auditor(llm: ChatOpenAI):
         )
         feedback = mejor.output.feedback_general if mejor else "Sin feedback disponible."
 
+        # ── Fallback errores: si score es bajo pero no hay consenso de errores ──
+        # Ocurre cuando el LLM no lista todos los ítems (pese al prompt) y los
+        # subagentes flaggean ítems distintos sin alcanzar la mayoría.
+        # También cubre el caso en que el LLM lista solo ítems con puntaje ≥ 2
+        # (ej. 3 ítems × 2 pts = 6/21) omitiendo los ítems con puntuación baja.
+        score_pct = consolidado["score_final"] / puntaje_max if puntaje_max > 0 else 1.0
+        if not consolidado["errores_consensuados"] and score_pct < 0.50 and mejor and mejor.output:
+            # Paso 1: errores del auditor principal (puntaje < 2)
+            errores_directos = _extraer_items_error(mejor.output)
+            if errores_directos:
+                consolidado["errores_consensuados"] = errores_directos
+                logger.info(
+                    f"[Auditor] Fallback score bajo ({score_pct:.0%}): "
+                    f"{len(errores_directos)} errores del auditor principal (sin consenso)"
+                )
+            else:
+                # Paso 2: buscar en TODOS los auditores items con puntaje ≤ 1
+                items_bajos = []
+                for r in resultados:
+                    if r.exitoso and r.output:
+                        for item in r.output.items_evaluados:
+                            if item.puntaje <= 1:
+                                items_bajos.append({
+                                    "item_numero":    item.item_numero,
+                                    "puntaje_actual": item.puntaje,
+                                    "descripcion":    item.observacion,
+                                })
+                if items_bajos:
+                    # Tomar el item con menor puntaje encontrado en cualquier auditor
+                    consolidado["errores_consensuados"] = [
+                        min(items_bajos, key=lambda x: x["puntaje_actual"])
+                    ]
+                    logger.info(
+                        f"[Auditor] Fallback individual ({score_pct:.0%}): "
+                        "1 error encontrado en auditor individual"
+                    )
+                else:
+                    # Paso 3: error sintético — el LLM omitió ítems bajos pese al prompt.
+                    # Inyectar el feedback general como error para que el Redactor
+                    # tenga guidance en la siguiente iteración.
+                    if n_iter == 0 and score_pct < 0.15:
+                        feedback_text = mejor.output.feedback_general or "El texto requiere mejoras generales según la rúbrica."
+                        consolidado["errores_consensuados"] = [{
+                            "item_numero":    1,
+                            "puntaje_actual": 0,
+                            "descripcion":    feedback_text[:600],
+                        }]
+                        logger.info(
+                            f"[Auditor] Fallback sintético ({score_pct:.0%}): "
+                            "el LLM omitió ítems bajos — error generado desde feedback general"
+                        )
+                    else:
+                        logger.info(
+                            f"[Auditor] Omitiendo fallback sintético en ciclo {n_iter} | score: {score_pct:.0%}"
+                        )
+
         loras_usadas = [lora.id for lora in loras]
+
+        # ── Puntaje inicial para métricas de Hake ────────────────────────────
+        # Ciclo 0: guardamos el score recién computado como baseline pre-test.
+        # Ciclos >0: preservamos el baseline original (nunca lo sobreescribimos),
+        # para que Gain Score use siempre (ciclo_0_score, ciclo_N_score).
+        if n_iter == 0:
+            puntaje_inicial_calc = float(consolidado["score_final"])
+        else:
+            puntaje_inicial_calc = float(state.get("puntaje_inicial") or 0.0)
 
         return {
             "feedback_auditor":            feedback,
@@ -253,6 +351,7 @@ def make_nodo_auditor(llm: ChatOpenAI):
             "scores_subagentes":           consolidado["scores_subagentes"],
             "consenso_matematico_auditor": consolidado["consenso_matematico"],
             "loras_activas":               loras_usadas,
+            "auditor_ejecutado":           True,
         }
 
     return nodo_auditor

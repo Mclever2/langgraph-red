@@ -25,7 +25,8 @@ AGENTES DISPONIBLES:
 REGLAS QUE DEBES RESPETAR:
 1. Si auditor no ha corrido → auditor
 2. No puedes ir a consenso o disenso sin que auditor Y metodologico hayan corrido
-3. No puedes ir a redactor sin consenso y disenso
+3. PROHIBIDO ir a redactor si consenso_ejecutado=False O disenso_ejecutado=False.
+   Solo propones 'redactor' cuando consenso_ok=True Y disenso_ok=True.
 4. No puedes ir a fin sin redactor (salvo que ya no haya errores tras el redactor)
 5. Si n_errores > 0 y debate_completado es False y consenso y disenso ya corrieron → puedes activar debate
 6. CRÍTICO: Si debate_completado es True → PROHIBIDO volver a debate. Debes ir a redactor.
@@ -34,6 +35,9 @@ REGLAS QUE DEBES RESPETAR:
 
 FLUJO ESPERADO EN CADA ITERACIÓN (sigue este orden estrictamente):
 auditor → metodologico → consenso → disenso → debate (si hay errores) → redactor → fin
+
+NOTA: Los campos consenso_ejecutado y disenso_ejecutado en el estado indican si ya
+corrieron en esta iteración. Si alguno es False, NUNCA propongas redactor.
 
 Responde ÚNICAMENTE con una de estas palabras exactas, sin explicación ni puntuación:
 auditor | metodologico | consenso | disenso | debate | redactor | fin

@@ -31,12 +31,12 @@ from ._panel_utils import ejecutar_panel, consolidar_panel_escritor, ResultadoSu
 
 logger = logging.getLogger(__name__)
 
-_UMBRAL_SUGERENCIAS = 0.80  # >= 80 % → modo sugerencias
+_UMBRAL_SUGERENCIAS = 0.8667  # >= 86.67 % (13/15) → modo sugerencias
 
 # ── Prompt del subagente de sugerencias ──────────────────────────────────────
 _PROMPT_SUGERENCIAS = """\
 Eres un asesor académico experto en tesis universitarias de pregrado.
-La sección evaluada ya alcanzó una calidad BUENA o MUY BUENA (≥ 80 % de la rúbrica).
+La sección evaluada ya alcanzó una calidad BUENA o MUY BUENA (≥ 86.67 % de la rúbrica).
 
 Tu tarea es identificar SOLO las mejoras puntuales que elevarían esta sección al máximo.
 NO reescribas el texto — el estudiante conserva su propia redacción.
@@ -190,7 +190,8 @@ def make_nodo_redactor(llm: ChatOpenAI):
                 api_key=os.getenv("OPENAI_API_KEY", ""),
                 model=model_name,
                 temperature=lora.temperatura,
-                max_retries=2,
+                max_retries=3,
+                timeout=600.0,
             )
 
             system_prompt = lora.system_prompt_completo(prompt_base)
@@ -204,6 +205,20 @@ def make_nodo_redactor(llm: ChatOpenAI):
                     "**LO QUE HIZO EL SUBAGENTE ANTERIOR DEL PANEL:**\n"
                     "{historial_panel}\n\n"
                     "{contexto_secciones_relacionadas}\n\n"
+                    "INSTRUCCIONES DE ESCRITURA — OBLIGATORIAS:\n"
+                    "- El contexto RAG y las referencias bibliográficas son SOLO orientación "
+                    "para ti. NUNCA copies frases, dimensiones o criterios del contexto RAG "
+                    "al texto generado.\n"
+                    "- Mantén el mismo registro académico y longitud aproximada del texto original. "
+                    "No extiendas el texto más de 1.5x su longitud original salvo necesidad real.\n"
+                    "- Para OBJETIVOS GENERALES: redacta UNA sola oración con esta estructura:\n"
+                    "  [verbo infinitivo] + [variable independiente] + \"en\" + [variable dependiente] "
+                    "+ \"de\" + [unidad de análisis] + \"en\" + [horizonte temporal].\n"
+                    "  No añadas sub-dimensiones, instrumentos ni metodología dentro del objetivo general.\n"
+                    "- Para OBJETIVOS ESPECÍFICOS: cada uno debe ser una oración independiente "
+                    "que se derive lógicamente del objetivo general.\n"
+                    "- Si la estructura del texto original es correcta, mejora SOLO la precisión "
+                    "de la redacción, no la estructura.\n\n"
                     "Responde ÚNICAMENTE con el texto mejorado, sin introducciones ni comentarios."
                 )),
             ])
@@ -227,8 +242,22 @@ def make_nodo_redactor(llm: ChatOpenAI):
                 ("system", prompt_base),
                 ("human", (
                     "Genera la versión mejorada del texto para la sección **{seccion}** "
-                    "(iteración #{iteracion}).\n"
-                    "Responde ÚNICAMENTE con el texto mejorado."
+                    "(iteración #{iteracion}).\n\n"
+                    "INSTRUCCIONES DE ESCRITURA — OBLIGATORIAS:\n"
+                    "- El contexto RAG y las referencias bibliográficas son SOLO orientación "
+                    "para ti. NUNCA copies frases, dimensiones o criterios del contexto RAG "
+                    "al texto generado.\n"
+                    "- Mantén el mismo registro académico y longitud aproximada del texto original. "
+                    "No extiendas el texto más de 1.5x su longitud original salvo necesidad real.\n"
+                    "- Para OBJETIVOS GENERALES: redacta UNA sola oración con esta estructura:\n"
+                    "  [verbo infinitivo] + [variable independiente] + \"en\" + [variable dependiente] "
+                    "+ \"de\" + [unidad de análisis] + \"en\" + [horizonte temporal].\n"
+                    "  No añadas sub-dimensiones, instrumentos ni metodología dentro del objetivo general.\n"
+                    "- Para OBJETIVOS ESPECÍFICOS: cada uno debe ser una oración independiente "
+                    "que se derive lógicamente del objetivo general.\n"
+                    "- Si la estructura del texto original es correcta, mejora SOLO la precisión "
+                    "de la redacción, no la estructura.\n\n"
+                    "Responde ÚNICAMENTE con el texto mejorado, sin introducciones ni comentarios."
                 )),
             ])
             chain_fb = prompt_fb | llm
