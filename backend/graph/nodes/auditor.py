@@ -219,7 +219,8 @@ def make_nodo_auditor(llm: ChatOpenAI):
                 api_key=os.getenv("OPENAI_API_KEY", ""),
                 model=model_name,
                 temperature=lora.temperatura,
-                max_retries=2,
+                max_retries=3,
+                timeout=600.0,
             ).with_structured_output(AuditorOutput)
 
             # Prompt = base + modificador LoRA (con universidad embebida)

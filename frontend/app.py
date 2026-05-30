@@ -14,7 +14,10 @@ from frontend.components.pantalla_seleccion import render_pantalla_seleccion
 from frontend.components.pantalla_revision  import render_pantalla_revision
 from frontend.components.pantalla_resultado import render_pantalla_resultado
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+)
 
 # ── Configuración de la página ────────────────────────────────────────────────
 st.set_page_config(

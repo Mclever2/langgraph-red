@@ -20,6 +20,7 @@ Protección anti-bucle:
 """
 
 import os
+import httpx
 from dotenv import load_dotenv
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
@@ -40,12 +41,29 @@ from .edges import routing_supervisor
 
 load_dotenv()
 
+# Secret Manager a veces inyecta \r\n al final del valor. Limpiar una vez aquí
+# afecta a todos los os.getenv("OPENAI_API_KEY") del proceso (auditor, redactor, etc.)
+_raw_key = os.environ.get("OPENAI_API_KEY", "")
+if _raw_key:
+    os.environ["OPENAI_API_KEY"] = _raw_key.strip()
+
 RECURSION_LIMIT = 80
+
+# Un solo cliente httpx compartido entre todos los LLMs.
+# Evita el problema de Cloud Run donde conexiones TCP nuevas
+# (una por cada ChatOpenAI separado) fallan intermitentemente.
+_http_client = httpx.Client(
+    timeout=httpx.Timeout(120.0, connect=30.0),
+    limits=httpx.Limits(
+        max_keepalive_connections=10,
+        max_connections=20,
+        keepalive_expiry=60.0,
+    ),
+)
 
 
 def _llm(temperatura: float = 0.3) -> ChatOpenAI:
-    """Crea un ChatOpenAI con la clave de API de OpenAI."""
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
     if not api_key:
         raise ValueError(
             "No se encontró 'OPENAI_API_KEY'. "
@@ -55,7 +73,9 @@ def _llm(temperatura: float = 0.3) -> ChatOpenAI:
         api_key=api_key,
         model="gpt-4o-mini",
         temperature=temperatura,
-        max_retries=2,
+        max_retries=3,
+        timeout=120.0,
+        http_client=_http_client,
     )
 
 

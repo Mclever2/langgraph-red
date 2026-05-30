@@ -29,24 +29,34 @@ def cargar_prompt(nombre_archivo: str) -> str:
 
 def invocar_con_backoff(chain, inputs: dict, max_reintentos: int = 3):
     """
-    Llama al LLM con reintentos de backoff exponencial ante errores 429.
+    Llama al LLM con reintentos de backoff exponencial ante errores transitorios.
+    Reintenta en: rate limit (429), connection errors y timeouts.
     Espera base: 5 s × 2^intento + jitter aleatorio (0-2 s).
     """
     for intento in range(max_reintentos):
         try:
             return chain.invoke(inputs)
         except Exception as exc:
-            es_rate_limit = "429" in str(exc) or "rate_limit" in str(exc).lower()
-            if es_rate_limit and intento < max_reintentos - 1:
+            msg = str(exc).lower()
+            es_transitorio = (
+                "429" in msg
+                or "rate_limit" in msg
+                or "connection" in msg
+                or "timeout" in msg
+                or "connect" in msg
+            )
+            if es_transitorio and intento < max_reintentos - 1:
                 espera = (2 ** intento) * 5 + random.uniform(0, 2)
+                causa = getattr(exc, "__cause__", None)
                 logger.warning(
-                    f"Rate limit Groq (intento {intento + 1}/{max_reintentos}). "
-                    f"Esperando {espera:.1f}s…"
+                    f"Error transitorio (intento {intento + 1}/{max_reintentos}): "
+                    f"{type(exc).__name__}: {exc} | "
+                    f"Causa: {type(causa).__name__}: {causa}. Esperando {espera:.1f}s…"
                 )
                 time.sleep(espera)
             else:
                 raise
-    raise RuntimeError("Se agotaron los reintentos por rate-limit de Groq.")
+    raise RuntimeError("Se agotaron los reintentos.")
 
 
 def calcular_consenso_matematico(scores: list, umbral_std: float = 0.5) -> dict:

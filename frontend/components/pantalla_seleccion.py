@@ -1,8 +1,12 @@
 """Pantalla 2 — Selección de sección y lanzamiento del grafo multiagente."""
 
 import re
+import logging
+import traceback
 
 import streamlit as st
+
+logger = logging.getLogger(__name__)
 
 from backend.config import (
     SECCIONES_TESIS, SECCION_ITEMS_MAP, DEPENDENCIAS_SECCIONES,
@@ -248,14 +252,43 @@ def render_pantalla_seleccion() -> None:
     # dinámicamente durante la ejecución del grafo (Auditor, Metodólogo, Redactor).
     set_vector_store(vs)
 
+    _NODO_LABELS = {
+        "nodo_supervisor":   "Supervisor",
+        "nodo_redactor":     "Redactor",
+        "nodo_auditor":      "Auditor",
+        "nodo_metodologico": "Metodólogo",
+        "nodo_debate":       "Debate (panel 4 subagentes)",
+        "nodo_consenso":     "Consenso",
+        "nodo_disenso":      "Disenso",
+        "nodo_exportador":   "Exportador",
+    }
+
+    nodos_completados: list[str] = []
+
     with st.status("Red multiagente trabajando…", expanded=True) as status_run:
         st.write("**Supervisor** orquesta la red — decide dinámicamente el siguiente agente…")
-        st.write("Redactor → Auditor → Metodólogo → Consenso/Disenso → Debate (orden dinámico)")
-        st.write("Cada agente regresa al Supervisor para que decida el siguiente paso…")
         try:
-            graph.invoke(estado_inicial, config)
+            for chunk in graph.stream(estado_inicial, config, stream_mode="updates"):
+                for nodo, _ in chunk.items():
+                    label = _NODO_LABELS.get(nodo, nodo)
+                    nodos_completados.append(nodo)
+                    st.write(f"✓ **{label}** completado")
         except Exception as exc:
-            st.session_state.error_msg = f"Error en el grafo: {exc}"
+            tb = traceback.format_exc()
+            ultimo_nodo = nodos_completados[-1] if nodos_completados else "ninguno"
+            # Log completo para Cloud Run logs (visible con `gcloud run services logs tail`)
+            logger.error(
+                "[GRAFO] Excepción después de %d nodos. Último completado: %s\n"
+                "Tipo: %s — Mensaje: %s\n%s",
+                len(nodos_completados), ultimo_nodo,
+                type(exc).__name__, exc, tb,
+            )
+            msg = (
+                f"[{type(exc).__name__}] {exc} "
+                f"| Último nodo: {ultimo_nodo} "
+                f"| Nodos ok: {len(nodos_completados)}"
+            )
+            st.session_state.error_msg = f"Error en el grafo: {msg}"
             st.rerun()
 
         st.session_state.graph_status = "completed"
