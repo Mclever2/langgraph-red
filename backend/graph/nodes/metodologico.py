@@ -66,15 +66,23 @@ def make_nodo_metodologico(llm: ChatOpenAI):
             f"Universidad: {universidad}"
         )
 
+        # Obtener descripciones de los criterios UPAO que aplican
+        from backend.config import _buscar_items_seccion, RUBRICA_ITEMS_UPAO
+        items_nums = _buscar_items_seccion(seccion)
+        criterios_lista = [f"- Ítem {n}: {RUBRICA_ITEMS_UPAO.get(n)}" for n in items_nums]
+        criterios_str = "\n".join(criterios_lista)
+
         # ── Enriquecer contexto: el metodólogo decide qué secciones necesita ─
         # El subagente de coherencia cruza secciones — el planner le da exactamente
         # lo que necesita para detectar contradicciones entre capítulos.
         logger.info("[Metodólogo] Planificando contexto adicional con RAG dinámico…")
         contexto_dinamico = obtener_contexto_dinamico(
-            llm          = llm,
-            seccion      = seccion,
-            texto_snippet= texto_a_evaluar[:500],
-            rol          = "metodólogo experto en coherencia cruzada de tesis universitarias",
+            llm              = llm,
+            seccion          = seccion,
+            texto_snippet    = texto_a_evaluar[:500],
+            rol              = "metodólogo experto en coherencia cruzada de tesis universitarias",
+            criterios        = criterios_str,
+            feedback_auditor = "",
         )
 
         # ── Inputs base ───────────────────────────────────────────────────────

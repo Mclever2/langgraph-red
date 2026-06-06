@@ -41,7 +41,8 @@ def render_pantalla_resultado() -> None:
             f"Puntaje: **{int(float(pts)) if pts else '?'}/{pts_max}** — el texto requiere mejoras significativas."
         )
 
-    _render_metricas_finales(n_iter, max_iter, pts, pts_max, rubrica)
+    puntaje_inicial = v.get("puntaje_inicial")
+    _render_metricas_finales(n_iter, max_iter, pts, pts_max, rubrica, puntaje_inicial)
     st.divider()
 
     tab_eval, tab_debate, tab_rag, tab_reportes = st.tabs([
@@ -86,24 +87,19 @@ def _buscar_pts_max(seccion: str) -> int:
 
 # ── Métricas superiores ───────────────────────────────────────────────────────
 
-def _render_metricas_finales(n_iter: int, max_iter: int, pts, pts_max: int, rubrica) -> None:
+def _render_metricas_finales(n_iter: int, max_iter: int, pts, pts_max: int, rubrica, puntaje_inicial) -> None:
     mc1, mc2, mc3 = st.columns(3)
     mc1.metric("Iteraciones automáticas", f"{n_iter}/{max_iter}")
 
-    if pts and pts_max and pts_max > 0:
-        mc2.metric("Puntaje de sección", badge_puntaje(int(pts), pts_max))
-        if rubrica and rubrica.get("tabla_vigesimal"):
-            from backend.rag.rubric_parser import puntaje_a_nota_dinamico
-            nota = puntaje_a_nota_dinamico(
-                round(pts * rubrica["puntaje_maximo"] / pts_max),
-                rubrica["tabla_vigesimal"],
-            )
-        else:
-            nota = puntaje_a_nota(round(pts * 99 / pts_max))
-        mc3.metric("Nota vigesimal estimada", f"{nota}/20")
+    if puntaje_inicial is not None and pts_max and pts_max > 0:
+        mc2.metric("Puntaje UPAO Inicial", badge_puntaje(int(puntaje_inicial), pts_max))
     else:
-        mc2.metric("Puntaje de sección", "—")
-        mc3.metric("Nota vigesimal estimada", "—")
+        mc2.metric("Puntaje UPAO Inicial", "—")
+
+    if pts is not None and pts_max and pts_max > 0:
+        mc3.metric("Puntaje UPAO Sugerido", badge_puntaje(int(pts), pts_max))
+    else:
+        mc3.metric("Puntaje UPAO Sugerido", "—")
 
 
 # ── Tab 1: Evaluación ─────────────────────────────────────────────────────────
@@ -125,7 +121,7 @@ def _render_tab_evaluacion(v: dict, seccion: str, rubrica, pts, pts_max: int) ->
                 st.caption("Contexto original del PDF (el Redactor no fue necesario).")
         else:
             st.caption(f"📄 Texto original — aprobado sin modificaciones (Puntaje: {int(float(pts)) if pts else '?'}/{pts_max})")
-        st.code(texto_final, language=None)
+        st.code(texto_final, language=None, wrap_lines=True)
         st.caption("Usa el ícono de copia para exportar el texto.")
         if "[COMPLETAR:" in texto_final:
             st.warning(
@@ -147,28 +143,44 @@ def _render_tab_evaluacion(v: dict, seccion: str, rubrica, pts, pts_max: int) ->
         st.info(sug_mejoras)
         st.divider()
 
-    # ── Rúbrica Evaluada del Texto de Entrada (Subagente 2 - Redactor) ────────
-    eval_rub_red = v.get("redactor_evaluacion_rubrica")
-    if eval_rub_red and isinstance(eval_rub_red, dict):
-        st.subheader("📋 Rúbrica Evaluada del Texto de Entrada (Subagente 2 - Redactor)")
-        secciones_sel = eval_rub_red.get("secciones_seleccionadas", [])
-        if secciones_sel:
-            st.markdown(f"**Secciones de la rúbrica tomadas en cuenta:** {', '.join(secciones_sel)}")
-        
-        items_eval = eval_rub_red.get("items", [])
-        if items_eval:
-            tabla_markdown = [
-                "| Ítem ID | Criterio de la Rúbrica | Puntaje | Justificación del Redactor |",
-                "| :--- | :--- | :--- | :--- |"
-            ]
-            for it in items_eval:
-                pts_ob = it.get("pts_obtenido", 0.0)
-                pts_mx = it.get("pts_max", 0.0)
-                tabla_markdown.append(
-                    f"| **{it.get('item_id', '?')}** | {it.get('descripcion', '')} | **{pts_ob}/{pts_mx}** | {it.get('razon', '')} |"
-                )
-            st.markdown("\n".join(tabla_markdown))
+    # ── Rúbrica UPAO Evaluada del Texto de Entrada (Original) ─────────────────
+    eval_upao_inicial = v.get("evaluacion_upao_inicial")
+    if eval_upao_inicial:
+        st.subheader("📋 Rúbrica UPAO Evaluada del Texto de Entrada (Original)")
+        from backend.config import RUBRICA_ITEMS_UPAO
+        tabla_markdown = [
+            "| Ítem ID | Criterio de la Rúbrica UPAO | Puntaje | Observación del Evaluador |",
+            "| :--- | :--- | :--- | :--- |"
+        ]
+        for it in eval_upao_inicial:
+            num = it.get("item_numero")
+            desc = RUBRICA_ITEMS_UPAO.get(num, "Ítem sin descripción")
+            pts_ob = it.get("puntaje", 0)
+            tabla_markdown.append(
+                f"| **{num:02d}** | {desc} | **{pts_ob}/3** | {it.get('observacion', '')} |"
+            )
+        st.markdown("\n".join(tabla_markdown))
         st.divider()
+
+    # ── Rúbrica UPAO Evaluada del Texto Sugerido / Final ──────────────────────
+    eval_upao_final = v.get("evaluacion_upao_final")
+    if eval_upao_final and n_iter > 0:
+        st.subheader("📋 Rúbrica UPAO Evaluada del Texto Sugerido / Final")
+        from backend.config import RUBRICA_ITEMS_UPAO
+        tabla_markdown_final = [
+            "| Ítem ID | Criterio de la Rúbrica UPAO | Puntaje | Observación del Evaluador |",
+            "| :--- | :--- | :--- | :--- |"
+        ]
+        for it in eval_upao_final:
+            num = it.get("item_numero")
+            desc = RUBRICA_ITEMS_UPAO.get(num, "Ítem sin descripción")
+            pts_ob = it.get("puntaje", 0)
+            tabla_markdown_final.append(
+                f"| **{num:02d}** | {desc} | **{pts_ob}/3** | {it.get('observacion', '')} |"
+            )
+        st.markdown("\n".join(tabla_markdown_final))
+        st.divider()
+
 
     # Feedback del auditor
     st.subheader("Feedback del Auditor")
@@ -387,7 +399,7 @@ def _render_tab_rag(v: dict) -> None:
             fragmentos = [f.strip() for f in ctx_pdf.split("---") if f.strip()]
             for i, frag in enumerate(fragmentos, 1):
                 with st.expander(f"Fragmento {i}", expanded=(i == 1)):
-                    st.text(frag)
+                    st.code(frag, language=None, wrap_lines=True)
         else:
             st.info("No se recuperaron fragmentos del PDF para esta sección.")
 
@@ -397,7 +409,7 @@ def _render_tab_rag(v: dict) -> None:
             fragmentos_lib = [f.strip() for f in ctx_libs.split("---") if f.strip()]
             for i, frag in enumerate(fragmentos_lib, 1):
                 with st.expander(f"Referencia {i}", expanded=(i == 1)):
-                    st.text(frag)
+                    st.code(frag, language=None, wrap_lines=True)
         else:
             st.info("No se recuperaron fragmentos de libros de referencia.")
 

@@ -28,22 +28,25 @@ logger = logging.getLogger(__name__)
 _PAUSA_POST_PLANIFICACION = 0.3  # segundos entre planificación y queries (OpenAI no necesita pausa larga)
 
 _PROMPT_PLANNER = """\
-Eres {rol} y estás a punto de evaluar la sección "{seccion}" de un proyecto de tesis universitaria.
+Eres un Planificador de Contexto RAG Académico (rol: {rol}).
+Estás evaluando la sección "{seccion}" de un proyecto de tesis de Ingeniería de la UPAO.
 
-Antes de iniciar tu evaluación, decide qué secciones adicionales del documento necesitas consultar
-para hacer una evaluación coherente (verificar consistencia, detectar contradicciones, confirmar alineación).
+CRITERIOS DE LA RÚBRICA A EVALUAR:
+{criterios}
 
-Devuelve EXACTAMENTE 2 o 3 queries de búsqueda, una por línea, sin numeración ni explicaciones.
-Cada query debe ser corta (5-10 palabras) y representar una sección estructural clave de una tesis.
+OBSERVACIONES/FEEDBACK DEL AUDITOR:
+{feedback_auditor}
 
-Queries válidas (ejemplos):
-objetivos general específicos investigación
-hipótesis variables relación dependiente independiente
-metodología tipo diseño investigación
-problema realidad formulación pregunta investigación
-marco teórico conceptos antecedentes base teórica
-operacionalización variables dimensiones indicadores
-población muestra técnica instrumento recolección datos"""
+Tu tarea es decidir qué otras secciones del PDF de tesis o qué información específica necesitas consultar de la memoria RAG para resolver las observaciones del Auditor, verificar consistencia o enriquecer la redacción.
+
+Devuelve EXACTAMENTE 2 o 3 queries de búsqueda en español, una por línea, sin numeración ni explicaciones adicionales. Cada query debe ser concisa (4-8 palabras) y directa para buscar en ChromaDB.
+
+Ejemplos de queries:
+antecedentes internacionales calidad metodologica
+objetivos especificos investigacion
+operacionalizacion variable independiente
+poblacion muestra calculo estadistico
+"""
 
 
 def obtener_contexto_dinamico(
@@ -51,17 +54,21 @@ def obtener_contexto_dinamico(
     seccion: str,
     texto_snippet: str,
     rol: str,
-    k_por_query: int = 3,
+    criterios: str = "",
+    feedback_auditor: str = "",
+    k_por_query: int = 4,
 ) -> str:
     """
     Hace UNA llamada LLM para planificar qué buscar, luego ejecuta las queries.
 
     Args:
-        llm:           Instancia ChatGroq del agente (usa su propia API key).
-        seccion:       Nombre de la sección bajo evaluación.
-        texto_snippet: Extracto del texto a evaluar (primeros ~400 chars).
-        rol:           Descripción del rol del agente (para el prompt).
-        k_por_query:   Fragmentos a recuperar por cada query.
+        llm:              Instancia ChatGroq del agente (usa su propia API key).
+        seccion:          Nombre de la sección bajo evaluación.
+        texto_snippet:    Extracto del texto a evaluar (primeros ~400 chars).
+        rol:              Descripción del rol del agente (para el prompt).
+        criterios:        Criterios de la rúbrica aplicables a esta sección.
+        feedback_auditor: Observaciones y feedback del auditor para resolver errores.
+        k_por_query:      Fragmentos a recuperar por cada query.
 
     Returns:
         Contexto adicional recuperado (string con fragmentos etiquetados),
@@ -75,12 +82,14 @@ def obtener_contexto_dinamico(
     try:
         prompt = ChatPromptTemplate.from_messages([
             ("system", _PROMPT_PLANNER),
-            ("human", "Extracto del texto a evaluar:\n{texto}"),
+            ("human", "Extracto del texto actual a mejorar:\n{texto}"),
         ])
         respuesta = (prompt | llm).invoke({
-            "rol":     rol,
-            "seccion": seccion,
-            "texto":   texto_snippet[:400],
+            "rol":              rol,
+            "seccion":          seccion,
+            "criterios":        criterios or "Sin criterios específicos.",
+            "feedback_auditor": feedback_auditor or "Sin observaciones previas.",
+            "texto":            texto_snippet[:400],
         })
         lineas = [l.strip() for l in respuesta.content.strip().split("\n") if l.strip()]
         queries = lineas[:3]

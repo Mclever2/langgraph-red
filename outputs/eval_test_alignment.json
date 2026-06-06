@@ -1,0 +1,48 @@
+{
+  "run_id": "test_alignment",
+  "arquitectura": null,
+  "universidad": "upao",
+  "metricas": {
+    "llm_judge_score": 3.5,
+    "llm_judge_max": 3.5,
+    "llm_judge_pct": 1.0,
+    "llm_judge_secciones": [
+      "3. Formulación"
+    ],
+    "llm_judge_items": [
+      {
+        "item_id": "3.1",
+        "descripcion": "c1",
+        "pts_max": 1.5,
+        "pts_obtenido": 1.5,
+        "razon": "ok"
+      },
+      {
+        "item_id": "3.2",
+        "descripcion": "c2",
+        "pts_max": 1.0,
+        "pts_obtenido": 1.0,
+        "razon": "ok"
+      },
+      {
+        "item_id": "3.3",
+        "descripcion": "c3",
+        "pts_max": 1.0,
+        "pts_obtenido": 1.0,
+        "razon": "ok"
+      }
+    ],
+    "gain_score": 1.0,
+    "gain_score_interpretacion": "mejora alta",
+    "gain_score_pre": 1.5,
+    "gain_score_post": 3.5,
+    "similitud_coseno": 0.9067,
+    "similitud_coseno_interpretacion": "alta similitud semántica (sin desviaciones)",
+    "context_precision": 0.0,
+    "context_precision_chunks_totales": 1,
+    "context_precision_chunks_relevantes": 0,
+    "context_precision_interpretacion": "Error en el cálculo: Missing credentials. Please pass an `api_key`, `workload_identity`, `admin_api_key`, or set the `OPENAI_API_KEY` or `OPENAI_ADMIN_KEY` environment variable.",
+    "iterative_consistency": [],
+    "iterative_consistency_has_iter": false
+  }
+}

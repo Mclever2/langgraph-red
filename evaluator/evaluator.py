@@ -56,15 +56,27 @@ def evaluar(datos: dict) -> dict:
     try:
         if texto_inicial.strip() and texto_inicial != texto_final:
             eval_inicial = evaluar_con_juez_llm(seccion_objetivo, texto_inicial, es_panel=False)
-            pts_ini = eval_inicial.puntaje_total
+            
+            # Encontrar los ítems que se evaluaron en ambos (intersección de IDs) para comparar manzanas con manzanas
+            ids_comunes = {item.item_id for item in eval_final.items} & {item.item_id for item in eval_inicial.items}
+            
+            if ids_comunes:
+                pts_ini = sum(item.pts_obtenido for item in eval_inicial.items if item.item_id in ids_comunes)
+                pts_fin = sum(item.pts_obtenido for item in eval_final.items if item.item_id in ids_comunes)
+                pts_max = sum(item.pts_max for item in eval_final.items if item.item_id in ids_comunes)
+            else:
+                pts_ini = eval_inicial.puntaje_total
+                pts_fin = eval_final.puntaje_total
+                pts_max = eval_final.puntaje_maximo
         else:
             pts_ini = eval_final.puntaje_total
+            pts_fin = eval_final.puntaje_total
+            pts_max = eval_final.puntaje_maximo
     except Exception as exc:
         logger.warning(f"[Evaluator] Error en LLM-as-judge inicial: {exc}")
         pts_ini = eval_final.puntaje_total
-
-    pts_fin = eval_final.puntaje_total
-    pts_max = eval_final.puntaje_maximo
+        pts_fin = eval_final.puntaje_total
+        pts_max = eval_final.puntaje_maximo
 
     # Calcular Hake Gain Score
     if pts_max > pts_ini:

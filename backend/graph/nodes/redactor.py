@@ -32,16 +32,16 @@ Eres un asesor académico experto en redacción de tesis de pregrado en Ingenier
 Tu tarea es reescribir y mejorar la sección de tesis del estudiante, aplicando las correcciones de los errores confirmados por el panel de auditoría, las observaciones metodológicas y el feedback general.
 
 REGLAS DE ESCRITURA OBLIGATORIAS:
-- El contexto RAG y las referencias bibliográficas son SOLO orientación para ti. NUNCA copies frases, dimensiones o criterios del contexto RAG al texto generado.
-- Mantén el mismo registro académico formal y longitud aproximada del texto original. No extiendas el texto más de 1.5x su longitud original salvo necesidad real.
+- **Usa el contexto RAG**: Incorpora datos empíricos, antecedentes, referencias a estudios previos, o información de otras secciones del proyecto que aparezcan en el contexto RAG para corregir los vacíos señalados (por ejemplo, si el Auditor observa la falta de antecedentes, incorpóralos usando la información real presente en el contexto RAG de la tesis).
+- Mantén el registro académico formal. Si es necesario para cumplir con los antecedentes o la descripción empírica solicitada por el Auditor, expande el texto lo necesario para que sea completo y riguroso.
+- Si no hay datos específicos en el RAG para completar un vacío (ej. estadísticas del problema), usa marcadores explicativos como `[INSERTAR DATO ESTADÍSTICO ACÁ]` o redacta de forma cualitativa con base en la realidad del proyecto.
 - Para OBJETIVOS GENERALES: redacta UNA sola oración con esta estructura:
   [verbo infinitivo] + [variable independiente] + "en" + [variable dependiente] + "de" + [unidad de análisis] + "en" + [horizonte temporal].
   No añadas sub-dimensiones, instrumentos ni metodología dentro del objetivo general.
 - Para OBJETIVOS ESPECÍFICOS: cada uno debe ser una oración independiente que se derive lógicamente del objetivo general.
-- Si la estructura del texto original es correcta, mejora SOLO la precisión de la redacción, no la estructura.
 
 FORMATO DE RESPUESTA:
-Responde ÚNICAMENTE con el texto mejorado, sin introducciones, comentarios ni explicaciones adicionales.
+Responde ÚNICAMENTE con el texto mejorado, respetando la numeración y estructura de la sección, sin introducciones, saludos ni explicaciones adicionales.
 """
 
 _PROMPT_PULIDOR = """
@@ -142,34 +142,27 @@ def make_nodo_redactor(llm: ChatOpenAI):
         
         # ── Subagente 2: Evaluador (Rúbrica de Entrada) ───────────────────────
         # Identifica qué secciones de la rúbrica aplican y evalúa el texto_base.
-        logger.info("[Redactor] Subagente 2 ejecutando evaluación de rúbrica sobre texto de entrada...")
-        try:
-            eval_entrada = evaluar_con_juez_llm(seccion, texto_base, es_panel=False)
-            evaluacion_rubrica_dict = eval_entrada.model_dump()
-        except Exception as exc:
-            logger.error(f"[Redactor/Subagente 2] Error al evaluar rúbrica: {exc}")
-            evaluacion_rubrica_dict = {
-                "secciones_seleccionadas": [seccion],
-                "items": [{
-                    "item_id": "?",
-                    "descripcion": "Error al evaluar con la rúbrica",
-                    "pts_max": 3.0,
-                    "pts_obtenido": 0.0,
-                    "razon": f"No se pudo completar la evaluación de este ítem: {exc}"
-                }],
-                "puntaje_total": 0.0,
-                "puntaje_maximo": 3.0
-            }
+        # [OPTIMIZADO] Se remueve la llamada redundante a G-Eval para ahorrar tokens y acelerar la respuesta.
+        evaluacion_rubrica_dict = None
+
 
         # ── Subagente 1: Escritor (Reescritura del Texto) ──────────────────────
         logger.info("[Redactor] Subagente 1 ejecutando reescritura del texto...")
         
+        # Obtener descripciones de los criterios UPAO que aplican
+        from backend.config import _buscar_items_seccion, RUBRICA_ITEMS_UPAO
+        items_nums = _buscar_items_seccion(seccion)
+        criterios_lista = [f"- Ítem {n}: {RUBRICA_ITEMS_UPAO.get(n)}" for n in items_nums]
+        criterios_str = "\n".join(criterios_lista)
+
         # Enriquecer contexto con RAG dinámico
         contexto_dinamico = obtener_contexto_dinamico(
-            llm          = llm,
-            seccion      = seccion,
-            texto_snippet= texto_base[:500],
-            rol          = "redactor académico que mejora secciones de tesis de ingeniería",
+            llm              = llm,
+            seccion          = seccion,
+            texto_snippet    = texto_base[:500],
+            rol              = "redactor académico que mejora secciones de tesis de ingeniería",
+            criterios        = criterios_str,
+            feedback_auditor = state.get("feedback_auditor") or state.get("observaciones_metodologicas") or "",
         )
 
         # Sintetizar veredicto del debate

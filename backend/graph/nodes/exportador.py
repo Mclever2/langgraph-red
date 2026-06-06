@@ -118,6 +118,9 @@ def make_nodo_exportador():
             "redactor_evaluacion_rubrica": state.get("redactor_evaluacion_rubrica"),
             "redactor_sugerencias_mejoras": state.get("redactor_sugerencias_mejoras"),
             "historial_textos": state.get("historial_textos"),
+            "evaluacion_upao_inicial": state.get("evaluacion_upao_inicial"),
+            "evaluacion_upao_final": state.get("evaluacion_upao_final"),
+
             "metadata": {
                 "max_iterations": state.get("max_iteraciones"),
                 "modelo_llm":     "llama-3.3-70b-versatile",

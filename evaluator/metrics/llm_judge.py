@@ -39,17 +39,9 @@ def cargar_rubrica_metodologica() -> str:
 
 _PROMPT_JUEZ_LLM = """
 Eres un Juez Metodológico de tesis de Ingeniería (estilo G-Eval). Evaluador de alta precisión.
-Tu tarea es evaluar la calidad metodológica de la sección de tesis del estudiante utilizando la RÚBRICA DE EVALUACIÓN DE CALIDAD METODOLÓGICA especializada adjunta.
+Tu tarea es evaluar la calidad metodológica de la sección de tesis del estudiante utilizando los criterios de la RÚBRICA DE EVALUACIÓN DE CALIDAD METODOLÓGICA especializada adjunta.
 
-REGLAS DE SELECCIÓN DE SECCIONES DE LA RÚBRICA:
-1. Debes analizar la "Sección Objetivo de la Tesis" y el "Texto a Evaluar".
-2. Selecciona ÚNICAMENTE las secciones y criterios de la rúbrica que son directamente aplicables a esa Sección Objetivo. 
-   - Por ejemplo, si se evalúa "1.2 Objetivos (General y Específicos)", debes seleccionar únicamente la sección "4. Objetivos de la investigación".
-   - Si se evalúa "3.3 Variables (Operacionalización)", selecciona únicamente "9. Variables y operacionalización".
-   - Si es "Vista general del proyecto", puedes seleccionar varias secciones representativas (como Título, Problema, Objetivos, Hipótesis y Metodología).
-   - De nada sirve evaluar ítems de "Referencias bibliográficas" si el estudiante está consultando "Formulación del problema". Sé lógico y selectivo.
-
-RÚBRICA COMPLETA DE REFERENCIA:
+RÚBRICA DE EVALUACIÓN (SECCIONES APLICABLES):
 {rubrica}
 
 ---
@@ -62,11 +54,15 @@ ENTRADAS A EVALUAR:
 ---
 
 REGLAS DE CALIFICACIÓN POR ÍTEM:
-- Para cada ítem aplicable en las secciones seleccionadas de la rúbrica, asigna:
+- Debes evaluar CADA ítem que aparezca en las secciones de la rúbrica proporcionadas arriba.
+- Para cada ítem, asigna:
   * Puntaje máximo (pts_max) si se cumple COMPLETAMENTE.
   * 50% de pts_max si se cumple PARCIALMENTE.
   * 0 si NO SE CUMPLE.
 - Escribe una justificación académica clara para cada ítem en "razon".
+- Calcula de forma precisa e interna:
+  * puntaje_maximo: suma de todos los pts_max.
+  * puntaje_total: suma de todos los pts_obtenido.
 
 Responde en formato estructurado de JSON.
 """
@@ -99,10 +95,111 @@ def _ejecutar_un_juez(
             "seccion_objetivo": seccion_objetivo,
             "texto": texto
         })
+        if resultado and resultado.items:
+            # Recalcular de forma determinista para evitar alucinaciones aritméticas del LLM
+            resultado.puntaje_total = sum(item.pts_obtenido for item in resultado.items)
+            resultado.puntaje_maximo = sum(item.pts_max for item in resultado.items)
         return resultado
     except Exception as exc:
         logger.warning(f"Juez LLM con modelo {model_name} y temp {temperature} falló: {exc}")
         return None
+
+def filtrar_rubrica_por_seccion(seccion_objetivo: str) -> str:
+    """Filtra rubrica.md para quedarse solo con las secciones aplicables a seccion_objetivo."""
+    rubrica_content = cargar_rubrica_metodologica()
+    if not rubrica_content or "Rúbrica metodológica no encontrada" in rubrica_content:
+        return rubrica_content
+
+    import re
+    from backend.config import _kw_seccion
+
+    # Mapeo de secciones de tesis a secciones de la rúbrica (1 a 15)
+    MAP_SECCION_OBJETIVO_A_NUMEROS = {
+        "1. Título del proyecto":                    [1],
+        "1.1 Descripción y delimitación":            [2],
+        "1.1.2 Problema central (formulación)":      [2, 3],
+        "1.2 Objetivos (General y Específicos)":     [4],
+        "1.3 Importancia del estudio":               [5],
+        "1.4 Justificación del estudio":             [5],
+        "2.2 Investigaciones antecedentes":          [7],
+        "2.3 Base teórica (Variables)":              [7],
+        "2.4 Definición de términos básicos":        [7],
+        "3.1–3.2 Hipótesis":                         [8],
+        "3.3 Variables (Operacionalización)":        [9],
+        "3.4 Matriz de consistencia":                [10],
+        "4.1–4.3 Tipo, Método y Diseño":             [11, 12],
+        "4.4 Población y muestra":                   [13],
+        "4.5 Instrumentos de recolección de datos":  [14],
+        "4.6 Procedimiento de ejecución":            [14],
+        "4.7 Análisis de datos":                     [15],
+        "5. Aspectos administrativos":               [6],
+        "III. Referencias bibliográficas":           [7],
+    }
+
+    # Encontrar coincidencia en el mapa
+    numeros = None
+    direct = MAP_SECCION_OBJETIVO_A_NUMEROS.get(seccion_objetivo)
+    if direct:
+        numeros = direct
+    else:
+        # Búsqueda por prefijo
+        m = re.match(r'^(\d[\d\.]*)', seccion_objetivo.strip())
+        prefijo_num = m.group(1).rstrip('.') if m else None
+        if prefijo_num:
+            for k, val in MAP_SECCION_OBJETIVO_A_NUMEROS.items():
+                m2 = re.match(r'^(\d[\d\.]*)', k.strip())
+                if m2 and m2.group(1).rstrip('.') == prefijo_num:
+                    numeros = val
+                    break
+        if not numeros:
+            # Búsqueda por overlap de palabras clave
+            kw = _kw_seccion(seccion_objetivo)
+            if kw:
+                mejor_jaccard = 0.0
+                for k, val in MAP_SECCION_OBJETIVO_A_NUMEROS.items():
+                    kw_k = _kw_seccion(k)
+                    inter = len(kw & kw_k)
+                    if inter == 0:
+                        continue
+                    union = len(kw | kw_k)
+                    jaccard = inter / union if union else 0.0
+                    if jaccard > mejor_jaccard:
+                        mejor_jaccard = jaccard
+                        numeros = val
+
+    if not numeros:
+        # Fallback para Vista general o secciones no mapeadas
+        if "vista general" in seccion_objetivo.lower():
+            numeros = [1, 2, 3, 4, 8, 11, 12]  # Título, problema, objetivos, hipótesis, tipo/diseño
+        else:
+            return rubrica_content
+
+    # Parsear rubrica.md para segmentarla por sección
+    pattern = r'\*\*(\d+)\\\.\s+([^*]+)\*\*'
+    matches = list(re.finditer(pattern, rubrica_content))
+    
+    secciones_texto = {}
+    for i, match in enumerate(matches):
+        num = int(match.group(1))
+        start_idx = match.start()
+        if i + 1 < len(matches):
+            end_idx = matches[i + 1].start()
+        else:
+            escala_match = re.search(r'\*\*ESCALA DE', rubrica_content)
+            end_idx = escala_match.start() if escala_match else len(rubrica_content)
+        secciones_texto[num] = rubrica_content[start_idx:end_idx].strip()
+
+    # Concatenar las secciones deseadas
+    partes = []
+    for n in sorted(numeros):
+        if n in secciones_texto:
+            partes.append(secciones_texto[n])
+
+    if partes:
+        cabecera = rubrica_content.split("**RÚBRICA DETALLADA POR SECCIÓN**")[0]
+        return cabecera + "\n\n**RÚBRICA DETALLADA (SECCIONES APLICABLES)**\n\n" + "\n\n".join(partes)
+    
+    return rubrica_content
 
 def evaluar_con_juez_llm(seccion_objetivo: str, texto: str, es_panel: bool = True) -> EvaluacionSeccion:
     """
@@ -117,7 +214,7 @@ def evaluar_con_juez_llm(seccion_objetivo: str, texto: str, es_panel: bool = Tru
             puntaje_maximo=1.0
         )
         
-    rubrica_content = cargar_rubrica_metodologica()
+    rubrica_content = filtrar_rubrica_por_seccion(seccion_objetivo)
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
     
     if not es_panel:
@@ -128,10 +225,9 @@ def evaluar_con_juez_llm(seccion_objetivo: str, texto: str, es_panel: bool = Tru
         raise ValueError("El Juez LLM único falló al evaluar el texto.")
 
     # Panel de 3 configuraciones/modelos
-    # Para mayor compatibilidad y evitar fallos por cuotas/permisos, usamos modelos estándar con temp distintas
     configuraciones = [
         {"model": "gpt-4o-mini", "temp": 0.0},
-        {"model": "gpt-4o", "temp": 0.2},  # Intenta gpt-4o, si no, fallará al mini
+        {"model": "gpt-4o", "temp": 0.2},
         {"model": "gpt-3.5-turbo", "temp": 0.1}
     ]
     
@@ -141,7 +237,6 @@ def evaluar_con_juez_llm(seccion_objetivo: str, texto: str, es_panel: bool = Tru
     with ThreadPoolExecutor(max_workers=3) as executor:
         futuros = []
         for config in configuraciones:
-            # Si gpt-4o o gpt-3.5-turbo fallan, se intenta gpt-4o-mini como fallback inmediato
             futuros.append(
                 executor.submit(
                     _ejecutar_un_juez,
@@ -180,11 +275,13 @@ def evaluar_con_juez_llm(seccion_objetivo: str, texto: str, es_panel: bool = Tru
     # 2. Encontrar el juez con el puntaje más cercano al promedio
     mejor_juez = min(resultados, key=lambda r: abs(r.puntaje_total - avg_score))
     
-    # 3. Retornar su evaluación pero con el puntaje_total promedio para reflejar el consenso del panel
-    # (Clamped a 1 decimal para limpieza)
+    # 3. Retornar su evaluación recalculando los puntajes directamente de sus ítems para mantener consistencia estricta
+    pts_total = sum(item.pts_obtenido for item in mejor_juez.items)
+    pts_max = sum(item.pts_max for item in mejor_juez.items)
+    
     return EvaluacionSeccion(
         secciones_seleccionadas=mejor_juez.secciones_seleccionadas,
         items=mejor_juez.items,
-        puntaje_total=round(avg_score, 1),
-        puntaje_maximo=mejor_juez.puntaje_maximo
+        puntaje_total=pts_total,
+        puntaje_maximo=pts_max
     )
