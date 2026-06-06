@@ -1,0 +1,62 @@
+{
+  "run_id": "dc2fe9ce-a131-4aff-b218-5a07deebf6e9",
+  "arquitectura": "langgraph-hub-spoke",
+  "universidad": "upao",
+  "metricas": {
+    "llm_judge_score": 2.3,
+    "llm_judge_max": 5.0,
+    "llm_judge_pct": 0.46,
+    "llm_judge_secciones": [
+      "3. Formulación del problema (pregunta central)"
+    ],
+    "llm_judge_items": [
+      {
+        "item_id": "3.1",
+        "descripcion": "El problema está formulado como una pregunta clara, directa y sin ambigüedad (¿en qué medida?, ¿qué efecto?, ¿cómo se relaciona?).",
+        "pts_max": 1.5,
+        "pts_obtenido": 0.0,
+        "razon": "El texto no presenta una pregunta formulada de manera clara y directa. Se describe el problema pero no se formula como una pregunta de investigación."
+      },
+      {
+        "item_id": "3.2",
+        "descripcion": "La pregunta involucra al menos dos variables o conceptos y su posible relación, diferencia o efecto.",
+        "pts_max": 1.0,
+        "pts_obtenido": 0.5,
+        "razon": "El texto menciona varios conceptos como la mentoría, la carga académica, y la calidad metodológica, pero no establece claramente una relación entre dos variables específicas en forma de pregunta."
+      },
+      {
+        "item_id": "3.3",
+        "descripcion": "La pregunta es respondible mediante el diseño de investigación propuesto (no requiere datos imposibles de obtener).",
+        "pts_max": 1.0,
+        "pts_obtenido": 0.5,
+        "razon": "Aunque el problema es abordable, no se presenta una pregunta específica que indique claramente cómo se responderá mediante un diseño de investigación. Sin embargo, los problemas mencionados son investigables."
+      },
+      {
+        "item_id": "3.4",
+        "descripcion": "La pregunta no es demasiado amplia ni demasiado estrecha; delimita un problema tratable en el tiempo del estudio.",
+        "pts_max": 0.75,
+        "pts_obtenido": 0.38,
+        "razon": "El problema es amplio y abarca varios aspectos, lo que podría dificultar su tratamiento en un solo estudio. No se delimita claramente en una pregunta específica."
+      },
+      {
+        "item_id": "3.5",
+        "descripcion": "La pregunta es coherente con los objetivos (la respuesta a la pregunta equivale a lograr el objetivo general).",
+        "pts_max": 0.75,
+        "pts_obtenido": 0.38,
+        "razon": "No se presenta una pregunta específica, por lo que no se puede evaluar completamente su coherencia con los objetivos. Sin embargo, el texto sugiere problemas que podrían alinearse con objetivos generales relacionados con la mejora de la calidad metodológica."
+      }
+    ],
+    "gain_score": 0.46,
+    "gain_score_interpretacion": "mejora moderada",
+    "gain_score_pre": 0.0,
+    "gain_score_post": 2.3,
+    "similitud_coseno": 0.9643,
+    "similitud_coseno_interpretacion": "alta similitud semántica (sin desviaciones)",
+    "context_precision": 1.0,
+    "context_precision_chunks_totales": 3,
+    "context_precision_chunks_relevantes": 3,
+    "context_precision_interpretacion": "alta relevancia RAG",
+    "iterative_consistency": [],
+    "iterative_consistency_has_iter": false
+  }
+}

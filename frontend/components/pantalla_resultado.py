@@ -140,6 +140,36 @@ def _render_tab_evaluacion(v: dict, seccion: str, rubrica, pts, pts_max: int) ->
 
     st.divider()
 
+    # ── Recomendaciones de Pulido (Subagente 3 - Redactor) ────────────────────
+    sug_mejoras = v.get("redactor_sugerencias_mejoras")
+    if sug_mejoras and sug_mejoras.strip():
+        st.subheader("💡 Recomendaciones de Pulido (Subagente 3 - Redactor)")
+        st.info(sug_mejoras)
+        st.divider()
+
+    # ── Rúbrica Evaluada del Texto de Entrada (Subagente 2 - Redactor) ────────
+    eval_rub_red = v.get("redactor_evaluacion_rubrica")
+    if eval_rub_red and isinstance(eval_rub_red, dict):
+        st.subheader("📋 Rúbrica Evaluada del Texto de Entrada (Subagente 2 - Redactor)")
+        secciones_sel = eval_rub_red.get("secciones_seleccionadas", [])
+        if secciones_sel:
+            st.markdown(f"**Secciones de la rúbrica tomadas en cuenta:** {', '.join(secciones_sel)}")
+        
+        items_eval = eval_rub_red.get("items", [])
+        if items_eval:
+            tabla_markdown = [
+                "| Ítem ID | Criterio de la Rúbrica | Puntaje | Justificación del Redactor |",
+                "| :--- | :--- | :--- | :--- |"
+            ]
+            for it in items_eval:
+                pts_ob = it.get("pts_obtenido", 0.0)
+                pts_mx = it.get("pts_max", 0.0)
+                tabla_markdown.append(
+                    f"| **{it.get('item_id', '?')}** | {it.get('descripcion', '')} | **{pts_ob}/{pts_mx}** | {it.get('razon', '')} |"
+                )
+            st.markdown("\n".join(tabla_markdown))
+        st.divider()
+
     # Feedback del auditor
     st.subheader("Feedback del Auditor")
     feedback = v.get("feedback_auditor", "—")
@@ -412,24 +442,60 @@ def _render_reportes_descarga(v: dict) -> None:
                 datos = json.load(f)
             metricas = datos.get("metricas", {})
             if metricas:
-                st.markdown("#### Métricas NLP del Proceso")
-                if metricas.get("sin_reescritura"):
-                    # Mostrar badge verde con texto explicativo
-                    st.success("✅ Texto aprobado sin reescritura — métricas NLP no aplican")
-                else:
-                    col1, col2, col3, col4 = st.columns(4)
-                    col1.metric("ROUGE-1 F",        f"{metricas.get('rouge1_f', 0):.4f}")
-                    col2.metric("ROUGE-2 F",        f"{metricas.get('rouge2_f', 0):.4f}")
-                    col3.metric("ROUGE-L F",        f"{metricas.get('rougeL_f', 0):.4f}")
-                    col4.metric("BLEU",             f"{metricas.get('bleu_score', 0):.4f}")
-                    col5, col6, col7 = st.columns(3)
-                    col5.metric("Similitud Coseno", f"{metricas.get('similitud_coseno', 0):.4f}")
-                    kv = metricas.get("kappa")
-                    col6.metric("Kappa",            f"{kv:.4f}" if kv is not None else "N/A")
-                    col7.metric("Gain Score",       f"{metricas.get('gain_score', 0):.4f}")
+                st.markdown("### 📊 Métricas de Proceso y Calidad (Rúbrica Especializada)")
+                
+                # Renderizar métricas principales en columnas
+                col1, col2, col3, col4 = st.columns(4)
+                
+                # 1. LLM-as-Judge
+                llm_score = metricas.get("llm_judge_score", 0.0)
+                llm_max = metricas.get("llm_judge_max", 0.0)
+                col1.metric("LLM-as-Judge (G-Eval)", f"{llm_score} / {llm_max}")
+                
+                # 2. Gain Score
+                gain_val = metricas.get("gain_score", 0.0)
+                col2.metric("Gain Score (Hake)", f"{gain_val:+.4f}", help=f"Pre: {metricas.get('gain_score_pre', 0.0)} → Post: {metricas.get('gain_score_post', 0.0)}\nInterpretación: {metricas.get('gain_score_interpretacion', '')}")
+                
+                # 3. Cosine Similarity
+                sim_cos = metricas.get("similitud_coseno", 0.0)
+                col3.metric("Similitud Coseno (e5)", f"{sim_cos:.4f}", help=metricas.get("similitud_coseno_interpretacion", ""))
+                
+                # 4. Context Precision
+                ctx_prec = metricas.get("context_precision", 0.0)
+                col4.metric("Context Precision", f"{ctx_prec:.4f}", help=metricas.get("context_precision_interpretacion", ""))
+                
+                # 5. Iterative Consistency (Trajectory)
+                if metricas.get("iterative_consistency_has_iter"):
+                    trajectory = metricas.get("iterative_consistency", [])
+                    st.markdown("#### 📈 Iterative Consistency (Trayectoria del Juez Externo)")
+                    trajectory_str = " ➔ ".join(f"**{s}**" for s in trajectory)
+                    st.info(f"Trayectoria de puntuaciones del Juez Externo: {trajectory_str}")
+                
                 st.divider()
-        except Exception:
-            pass
+                
+                # Mostrar los detalles del Juez LLM
+                st.markdown("### 📋 Evaluación Detallada del Juez LLM (G-Eval)")
+                secciones_sel = metricas.get("llm_judge_secciones", [])
+                if secciones_sel:
+                    st.markdown(f"**Secciones de la Rúbrica Seleccionadas:** {', '.join(secciones_sel)}")
+                    
+                items_eval = metricas.get("llm_judge_items", [])
+                if items_eval:
+                    tabla_markdown = [
+                        "| Ítem | Criterio de la Rúbrica | Puntaje | Justificación Académica |",
+                        "| :--- | :--- | :--- | :--- |"
+                    ]
+                    for it in items_eval:
+                        pts_ob = it.get("pts_obtenido", 0.0)
+                        pts_mx = it.get("pts_max", 0.0)
+                        tabla_markdown.append(
+                            f"| **{it.get('item_id', '?')}** | {it.get('descripcion', '')} | **{pts_ob}/{pts_mx}** | {it.get('razon', '')} |"
+                        )
+                    st.markdown("\n".join(tabla_markdown))
+                
+                st.divider()
+        except Exception as exc:
+            st.error(f"Error cargando métricas: {exc}")
 
     # ── Botones de descarga (siempre que los archivos existan) ────────────────
     st.markdown("#### Descargar Reportes")
@@ -460,50 +526,41 @@ def _render_reportes_descarga(v: dict) -> None:
             use_container_width=True,
         )
 
-    # Métricas NLP (eval JSON — solo si sacrebleu/rouge_score instalados)
+    # Métricas (eval JSON)
     if ruta_eval and os.path.isfile(ruta_eval):
         with open(ruta_eval, encoding="utf-8") as f:
             contenido_eval = f.read()
         col_d3.download_button(
-            label="📊 Métricas NLP (.json)",
+            label="📊 Métricas Académicas (.json)",
             data=contenido_eval,
             file_name=os.path.basename(ruta_eval),
             mime="application/json",
             use_container_width=True,
         )
     else:
-        col_d3.caption(
-            "Métricas NLP no disponibles.  \n"
-            "Instala `sacrebleu` y `rouge-score`:  \n"
-            "`pip install sacrebleu rouge-score`"
-        )
+        col_d3.caption("Métricas no disponibles para esta sesión.")
 
 
 def _render_metricas_nlp(run_id: str) -> None:
     if not run_id:
-        st.caption("Métricas NLP no disponibles para esta sesión.")
+        st.caption("Métricas no disponibles para esta sesión.")
         return
     ruta = f"./outputs/run_{run_id}.json"
     if not os.path.isfile(ruta):
-        st.caption("Métricas NLP no disponibles para esta sesión.")
+        st.caption("Métricas no disponibles para esta sesión.")
         return
     try:
         from evaluator.evaluator import evaluar_desde_archivo
         resultado = evaluar_desde_archivo(ruta)
         m = resultado.get("metricas", {})
-        st.subheader("Métricas NLP del Proceso")
+        st.subheader("Métricas de Proceso y Calidad")
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("ROUGE-1 F", f"{m.get('rouge1_f', 0):.4f}")
-        col2.metric("ROUGE-2 F", f"{m.get('rouge2_f', 0):.4f}")
-        col3.metric("ROUGE-L F", f"{m.get('rougeL_f', 0):.4f}")
-        col4.metric("BLEU",      f"{m.get('bleu_score', 0):.4f}")
-        col5, col6, col7 = st.columns(3)
-        col5.metric("Similitud Coseno", f"{m.get('similitud_coseno', 0):.4f}")
-        kappa_val = m.get("kappa")
-        col6.metric("Kappa", f"{kappa_val:.4f}" if kappa_val is not None else "N/A")
-        col7.metric("Gain Score",       f"{m.get('gain_score', 0):.4f}")
+        col1.metric("LLM-as-Judge (G-Eval)", f"{m.get('llm_judge_score', 0)} / {m.get('llm_judge_max', 0)}")
+        col2.metric("Gain Score", f"{m.get('gain_score', 0):.4f}")
+        col3.metric("Similitud Coseno (e5)", f"{m.get('similitud_coseno', 0):.4f}")
+        col4.metric("Context Precision", f"{m.get('context_precision', 0):.4f}")
     except Exception:
-        st.caption("Métricas NLP no disponibles para esta sesión.")
+        st.caption("Métricas no disponibles para esta sesión.")
 
 
 # ── Botones finales ───────────────────────────────────────────────────────────

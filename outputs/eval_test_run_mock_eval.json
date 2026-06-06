@@ -1,0 +1,28 @@
+{
+  "run_id": "test_run_mock_eval",
+  "arquitectura": null,
+  "universidad": "upao",
+  "metricas": {
+    "llm_judge_score": 0.0,
+    "llm_judge_max": 1.0,
+    "llm_judge_pct": 0.0,
+    "llm_judge_secciones": [],
+    "llm_judge_items": [],
+    "gain_score": 0.0,
+    "gain_score_interpretacion": "sin cambio",
+    "gain_score_pre": 0.0,
+    "gain_score_post": 0.0,
+    "similitud_coseno": 0.8963,
+    "similitud_coseno_interpretacion": "similitud moderada (preserva el sentido general)",
+    "context_precision": 1.0,
+    "context_precision_chunks_totales": 2,
+    "context_precision_chunks_relevantes": 2,
+    "context_precision_interpretacion": "alta relevancia RAG",
+    "iterative_consistency": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "iterative_consistency_has_iter": true
+  }
+}

@@ -99,6 +99,8 @@ def make_nodo_exportador():
             "universidad": state.get("universidad", ""),
             "programa":    state.get("programa", ""),
             "arquitectura": "langgraph-hub-spoke",
+            "seccion_objetivo": state.get("seccion_objetivo", ""),
+            "contexto_teorico": state.get("contexto_teorico", ""),
             "texto_inicial": state.get("contexto_recuperado", ""),
             "texto_final":   state.get("texto_iterado", ""),
             "puntaje_inicial": state.get("puntaje_inicial", 0.0),
@@ -113,6 +115,9 @@ def make_nodo_exportador():
             ],
             "resultado_consenso": state.get("resultado_consenso", ""),
             "resultado_disenso":  state.get("resultado_disenso", ""),
+            "redactor_evaluacion_rubrica": state.get("redactor_evaluacion_rubrica"),
+            "redactor_sugerencias_mejoras": state.get("redactor_sugerencias_mejoras"),
+            "historial_textos": state.get("historial_textos"),
             "metadata": {
                 "max_iterations": state.get("max_iteraciones"),
                 "modelo_llm":     "llama-3.3-70b-versatile",
@@ -139,37 +144,9 @@ def make_nodo_exportador():
             from evaluator.evaluator import evaluar_desde_archivo
             from evaluator.report import guardar_reporte
             
-            texto_final = state.get("texto_iterado") or ""
-            hubo_reescritura = bool(texto_final.strip())
-            
-            if not hubo_reescritura:
-                # Si no hay reescritura, guardamos directamente el archivo eval con None y sin_reescritura=True
-                resultado_eval = {
-                    "run_id": run_id,
-                    "arquitectura": "langgraph-hub-spoke",
-                    "universidad": state.get("universidad", ""),
-                    "metricas": {
-                        "rouge1": None,
-                        "rouge2": None, 
-                        "rougeL": None,
-                        "bleu": None,
-                        "similitud_coseno": None,
-                        "gain_score": None,
-                        "sin_reescritura": True
-                    }
-                }
-                ruta_eval = _OUTPUTS_DIR / f"eval_{run_id}.json"
-                with open(ruta_eval, "w", encoding="utf-8") as f:
-                    json.dump(resultado_eval, f, ensure_ascii=False, indent=2)
-                
-                # También guardar un reporte markdown simple
-                ruta_reporte = _OUTPUTS_DIR / f"eval_{run_id}_reporte.md"
-                with open(ruta_reporte, "w", encoding="utf-8") as f:
-                    f.write("# Reporte de Evaluación Académica\n\nEl texto fue aprobado en la primera pasada sin reescritura. Las métricas NLP no aplican.")
-            else:
-                evaluar_desde_archivo(str(ruta))
-                ruta_eval    = _OUTPUTS_DIR / f"eval_{run_id}.json"
-                ruta_reporte = guardar_reporte(str(ruta_eval))
+            evaluar_desde_archivo(str(ruta))
+            ruta_eval    = _OUTPUTS_DIR / f"eval_{run_id}.json"
+            ruta_reporte = guardar_reporte(str(ruta_eval))
                 
             logger.info(f"[Exportador] Métricas en {ruta_eval} | Reporte en {ruta_reporte}")
         except Exception as exc:
