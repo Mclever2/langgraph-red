@@ -1,0 +1,62 @@
+{
+  "run_id": "a636819a-2501-4918-b4b6-dd685a5c6e48",
+  "arquitectura": "langgraph-hub-spoke",
+  "universidad": "upao",
+  "metricas": {
+    "llm_judge_score": 5.8,
+    "llm_judge_max": 5.0,
+    "llm_judge_pct": 1.16,
+    "llm_judge_secciones": [
+      "3. Formulación del problema (pregunta central)"
+    ],
+    "llm_judge_items": [
+      {
+        "item_id": "3.1",
+        "descripcion": "El problema está formulado como una pregunta clara, directa y sin ambigüedad (¿en qué medida?, ¿qué efecto?, ¿cómo se relaciona?).",
+        "pts_max": 1.5,
+        "pts_obtenido": 1.5,
+        "razon": "La pregunta general está formulada de manera clara y directa, preguntando específicamente por el efecto del uso de sistemas multi-agente en la calidad metodológica de los proyectos de tesis, lo cual es preciso y sin ambigüedades."
+      },
+      {
+        "item_id": "3.2",
+        "descripcion": "La pregunta involucra al menos dos variables o conceptos y su posible relación, diferencia o efecto.",
+        "pts_max": 1.0,
+        "pts_obtenido": 1.0,
+        "razon": "La pregunta involucra dos conceptos: el uso de sistemas multi-agente y la calidad metodológica de los proyectos de tesis, y pregunta por el efecto de uno sobre el otro."
+      },
+      {
+        "item_id": "3.3",
+        "descripcion": "La pregunta es respondible mediante el diseño de investigación propuesto (no requiere datos imposibles de obtener).",
+        "pts_max": 1.0,
+        "pts_obtenido": 1.0,
+        "razon": "La pregunta es respondible mediante un diseño experimental que compare grupos, lo cual es viable y no requiere datos imposibles de obtener."
+      },
+      {
+        "item_id": "3.4",
+        "descripcion": "La pregunta no es demasiado amplia ni demasiado estrecha; delimita un problema tratable en el tiempo del estudio.",
+        "pts_max": 0.75,
+        "pts_obtenido": 0.75,
+        "razon": "La pregunta está bien delimitada al contexto de los estudiantes de Ingeniería de la UPAO en el año 2026, lo cual es un marco temporal y espacial adecuado."
+      },
+      {
+        "item_id": "3.5",
+        "descripcion": "La pregunta es coherente con los objetivos (la respuesta a la pregunta equivale a lograr el objetivo general).",
+        "pts_max": 0.75,
+        "pts_obtenido": 0.75,
+        "razon": "La pregunta general es coherente con el objetivo general del estudio, ya que ambos se centran en evaluar el efecto de los sistemas multi-agente en la calidad metodológica."
+      }
+    ],
+    "gain_score": 0.0,
+    "gain_score_interpretacion": "sin cambio",
+    "gain_score_pre": 15.5,
+    "gain_score_post": 5.8,
+    "similitud_coseno": 0.9878,
+    "similitud_coseno_interpretacion": "alta similitud semántica (sin desviaciones)",
+    "context_precision": 1.0,
+    "context_precision_chunks_totales": 3,
+    "context_precision_chunks_relevantes": 3,
+    "context_precision_interpretacion": "alta relevancia RAG",
+    "iterative_consistency": [],
+    "iterative_consistency_has_iter": false
+  }
+}

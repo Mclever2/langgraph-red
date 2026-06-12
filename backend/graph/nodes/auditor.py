@@ -173,21 +173,47 @@ def make_nodo_auditor(llm: ChatOpenAI):
         fuente_texto = "mejorado" if (n_iter > 0 and state.get("texto_iterado")) else "original"
         logger.info(f"[Auditor] Evaluando texto de {len(texto_a_evaluar)} chars | fuente: {fuente_texto}")
 
+        items_texto, puntaje_max, rubrica_desc = _construir_rubrica(state, seccion)
+
         # ── Enriquecer contexto: el auditor decide qué secciones necesita ver ─
         logger.info("[Auditor] Planificando contexto adicional con RAG dinámico…")
         contexto_dinamico = obtener_contexto_dinamico(
-            llm          = llm,
-            seccion      = seccion,
-            texto_snippet= texto_a_evaluar[:500],
-            rol          = "auditor especializado en rúbricas universitarias",
+            llm              = llm,
+            seccion          = seccion,
+            texto_snippet    = texto_a_evaluar[:500],
+            rol              = "auditor especializado en rúbricas universitarias",
+            criterios        = items_texto,
+            feedback_auditor = "",
         )
-
-        items_texto, puntaje_max, rubrica_desc = _construir_rubrica(state, seccion)
 
         logger.info(
             f"[Auditor] Ciclo {n_iter} | {seccion} | {fuente_texto} | "
             f"Rúbrica: {rubrica_desc} | Universidad: {universidad}"
         )
+
+        # ── Contexto de iteración para que el Auditor reconozca el texto mejorado ──
+        if n_iter > 0:
+            errores_previos = state.get("errores_rubrica", [])
+            texto_errores = ""
+            for e in errores_previos:
+                texto_errores += f"- Ítem {e.get('item_numero', '?')}: {e.get('descripcion', '')}\n"
+                
+            contexto_iteracion = f"""
+---
+## CONTEXTO DE ITERACIÓN (¡IMPORTANTE!)
+
+Estás evaluando una VERSIÓN MEJORADA del texto (Iteración {n_iter}).
+En la iteración anterior, se encontraron los siguientes errores:
+{texto_errores}
+
+Tu tarea principal ahora es VERIFICAR SI ESTOS ERRORES FUERON CORREGIDOS en el nuevo texto.
+- Si el texto nuevo incorpora los elementos solicitados (ej. citas, aclaraciones, referencias, formato), ELEVA EL PUNTAJE de esos ítems a 2 o 3.
+- Reconoce el esfuerzo de mejora. No busques excusas para mantener el puntaje en 1 si el estudiante corrigió lo indicado.
+- NO crees nuevos errores para ítems que ya habían sido aprobados.
+---
+"""
+        else:
+            contexto_iteracion = ""
 
         # ── Inputs base comunes a todos los subagentes ────────────────────────
         inputs_base = {
@@ -200,6 +226,7 @@ def make_nodo_auditor(llm: ChatOpenAI):
             "contexto_teorico":      state.get("contexto_teorico") or "",
             "universidad":           universidad,
             "programa":              programa,
+            "contexto_iteracion":    contexto_iteracion,
             # Drive y biblioteca se añaden dinámicamente via MCP fetch
             "rubrica_institucional_drive": "",
             "contexto_biblioteca_disponible": "",
@@ -332,19 +359,58 @@ def make_nodo_auditor(llm: ChatOpenAI):
 
         loras_usadas = [lora.id for lora in loras]
 
+        # ── Consolidar todos los ítems evaluados (incluyendo aciertos y errores) ──
+        todos_items_subagentes = []
+        for r in resultados:
+            if r.exitoso and r.output and hasattr(r.output, "items_evaluados"):
+                for it in r.output.items_evaluados:
+                    todos_items_subagentes.append({
+                        "item_numero": it.item_numero,
+                        "puntaje": it.puntaje,
+                        "observacion": it.observacion,
+                    })
+
+        # Agrupar por item_numero
+        conteo_items = {}
+        for it in todos_items_subagentes:
+            num = it["item_numero"]
+            conteo_items.setdefault(num, []).append(it)
+
+        items_consolidados = []
+        for num in sorted(conteo_items.keys()):
+            grupo = conteo_items[num]
+            puntajes = [g["puntaje"] for g in grupo]
+            puntaje_promedio = round(sum(puntajes) / len(puntajes)) if puntajes else 0
+            
+            # Buscar observación para este ítem
+            obs_elegida = grupo[0]["observacion"]
+            for g in grupo:
+                if g["puntaje"] == puntaje_promedio:
+                    obs_elegida = g["observacion"]
+                    break
+            
+            items_consolidados.append({
+                "item_numero": num,
+                "puntaje": puntaje_promedio,
+                "observacion": obs_elegida,
+            })
+
+        # Puntaje total programático recalculado desde los ítems consolidados para consistencia matemática
+        puntaje_total_consolidado = sum(it["puntaje"] for it in items_consolidados) if items_consolidados else consolidado["score_final"]
+
         # ── Puntaje inicial para métricas de Hake ────────────────────────────
         # Ciclo 0: guardamos el score recién computado como baseline pre-test.
         # Ciclos >0: preservamos el baseline original (nunca lo sobreescribimos),
         # para que Gain Score use siempre (ciclo_0_score, ciclo_N_score).
         if n_iter == 0:
-            puntaje_inicial_calc = float(consolidado["score_final"])
+            puntaje_inicial_calc = float(puntaje_total_consolidado)
         else:
-            puntaje_inicial_calc = float(state.get("puntaje_inicial") or 0.0)
+            puntaje_inicial_calc = float(state.get("puntaje_inicial") or puntaje_total_consolidado)
 
-        return {
+        ret_dict = {
             "feedback_auditor":            feedback,
             "errores_rubrica":             consolidado["errores_consensuados"],
-            "puntaje_estimado":            consolidado["score_final"],
+            "puntaje_estimado":            puntaje_total_consolidado,
             "puntaje_inicial":             puntaje_inicial_calc,
             "iter_auditada":               n_iter + 1,
             "_puntaje_max":                puntaje_max,
@@ -352,7 +418,16 @@ def make_nodo_auditor(llm: ChatOpenAI):
             "consenso_matematico_auditor": consolidado["consenso_matematico"],
             "loras_activas":               loras_usadas,
             "auditor_ejecutado":           True,
+            "evaluacion_upao_final":       items_consolidados,
         }
+
+        if n_iter == 0:
+            ret_dict["evaluacion_upao_inicial"] = items_consolidados
+        else:
+            ret_dict["evaluacion_upao_inicial"] = state.get("evaluacion_upao_inicial") or items_consolidados
+
+        return ret_dict
+
 
     return nodo_auditor
 

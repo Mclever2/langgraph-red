@@ -39,7 +39,8 @@ def render_pantalla_revision() -> None:
     )
     st.divider()
 
-    _render_metricas(n_iter, errores, pts, pts_max, rubrica)
+    puntaje_inicial = v.get("puntaje_inicial")
+    _render_metricas(v, n_iter, errores, pts, pts_max, rubrica, puntaje_inicial)
     st.divider()
     _render_tabs_informe(
         v, errores, feedback, seccion, rubrica,
@@ -53,27 +54,26 @@ def render_pantalla_revision() -> None:
 
 # ── Secciones internas ────────────────────────────────────────────────────────
 
-def _render_metricas(n_iter: int, errores: list, pts, pts_max: int, rubrica) -> None:
+def _render_metricas(v: dict, n_iter: int, errores: list, pts, pts_max: int, rubrica, puntaje_inicial) -> None:
     c1, c2, c3, c4 = st.columns(4)
     max_iter_config = v.get("max_iteraciones", 1)
     c1.metric("Iteraciones", f"{n_iter}/{max_iter_config}")
     c2.metric(
-        "Errores finales",
+        "Errores detectados",
         len(errores),
         delta="Sin errores" if len(errores) == 0 else None,
         delta_color="normal",
     )
-    c3.metric("Puntaje sección", badge_puntaje(pts or 0, pts_max) if pts else "—")
-    if pts and pts_max > 0:
-        if rubrica and rubrica.get("tabla_vigesimal"):
-            from backend.rag.rubric_parser import puntaje_a_nota_dinamico
-            nota = puntaje_a_nota_dinamico(
-                round(pts * rubrica["puntaje_maximo"] / pts_max),
-                rubrica["tabla_vigesimal"],
-            )
-        else:
-            nota = puntaje_a_nota(round(pts * 99 / pts_max))
-        c4.metric("Nota estimada (vigesimal)", f"{nota}/20")
+    
+    if puntaje_inicial is not None and pts_max and pts_max > 0:
+        c3.metric("Puntaje UPAO Inicial", badge_puntaje(int(puntaje_inicial), pts_max))
+    else:
+        c3.metric("Puntaje UPAO Inicial", "—")
+
+    if pts is not None and pts_max and pts_max > 0:
+        c4.metric("Puntaje UPAO Sugerido", badge_puntaje(int(pts), pts_max))
+    else:
+        c4.metric("Puntaje UPAO Sugerido", "—")
 
 
 def _render_tabs_informe(
@@ -111,7 +111,7 @@ def _render_tabs_informe(
 
     with tabs[4]:
         st.markdown("**Contexto original extraído del PDF (sección evaluada):**")
-        st.text(v.get("contexto_recuperado", "—"))
+        st.code(v.get("contexto_recuperado", "—"), language=None, wrap_lines=True)
 
     with tabs[5]:
         st.markdown("**Fragmentos recuperados por ChromaDB (RAG):**")
@@ -119,7 +119,7 @@ def _render_tabs_informe(
         for i, fragmento in enumerate(contexto_raw.split("---"), start=1):
             if fragmento.strip():
                 with st.expander(f"Fragmento {i}"):
-                    st.text(fragmento.strip())
+                    st.code(fragmento.strip(), language=None, wrap_lines=True)
 
 
 def _render_tab_auditor(errores, feedback, seccion, rubrica, obs_metod, v) -> None:

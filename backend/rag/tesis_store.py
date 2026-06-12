@@ -79,7 +79,7 @@ CHUNK_SIZE    = 600
 CHUNK_OVERLAP = 80
 K_RESULTADOS  = 4        # solo para fallback sin metadata de sección
 K_INICIAL     = 6        # cuántos resultados top usar para detectar la sección dominante
-MAX_FRAGMENTOS_SECCION = 20  # límite de fragmentos por sección (~12 000 chars máx)
+MAX_FRAGMENTOS_SECCION = 50  # límite de fragmentos por sección (~30 000 chars máx)
 
 _MIN_CHARS_CHUNK = 80
 
@@ -316,6 +316,10 @@ def construir_vector_store(
 
     logger.info(f"Tesis dividida en {len(documentos)} fragmentos")
 
+    # Inyectar chunk_index en el metadata de cada documento
+    for idx, doc in enumerate(documentos):
+        doc.metadata["chunk_index"] = idx
+
     cliente = chromadb.EphemeralClient()
     store = Chroma(
         client=cliente,
@@ -358,6 +362,7 @@ def recuperar_contexto(
 
     if not top_meta:
         docs = todos_docs[:k]
+        docs.sort(key=lambda d: d.metadata.get("chunk_index", 0))
         logger.info(f"RAG tesis: {len(docs)} fragmentos (sin metadata de sección)")
     else:
         # Prefijos del config (maneja rangos como "4.1–4.3" → ["4.1","4.2","4.3"])
@@ -376,6 +381,8 @@ def recuperar_contexto(
             docs = [d for d in todos_docs
                     if any(_es_subseccion(d.metadata.get("seccion", ""), cp)
                            for cp in config_prefijos)]
+            # Ordenar cronológicamente usando chunk_index
+            docs.sort(key=lambda d: d.metadata.get("chunk_index", 0))
             docs = docs[:MAX_FRAGMENTOS_SECCION]
             logger.info(
                 f"RAG tesis: prefijos config {config_prefijos} → "
@@ -387,6 +394,8 @@ def recuperar_contexto(
             if ancestor:
                 docs = [d for d in todos_docs
                         if _es_subseccion(d.metadata.get("seccion", ""), ancestor)]
+                # Ordenar cronológicamente usando chunk_index
+                docs.sort(key=lambda d: d.metadata.get("chunk_index", 0))
                 docs = docs[:MAX_FRAGMENTOS_SECCION]
                 logger.info(
                     f"RAG tesis: ancestro semántico '{ancestor}' "
@@ -403,6 +412,8 @@ def recuperar_contexto(
                 else:
                     docs = [d for d in todos_docs
                             if d.metadata.get("seccion") == seccion_dominante]
+                # Ordenar cronológicamente usando chunk_index
+                docs.sort(key=lambda d: d.metadata.get("chunk_index", 0))
                 docs = docs[:MAX_FRAGMENTOS_SECCION]
                 logger.info(
                     f"RAG tesis: dominante '{seccion_dominante}' → "
@@ -429,8 +440,8 @@ _CONSULTAS_CRUZADAS: dict[str, str] = {
 }
 
 # Chars máximos por fragmento y total para no sobrecargar el contexto de los agentes
-_MAX_CHARS_POR_FRAGMENTO = 500
-_MAX_CHARS_CRUZADO       = 6_000
+_MAX_CHARS_POR_FRAGMENTO = 3000
+_MAX_CHARS_CRUZADO       = 15_000
 
 
 def recuperar_contexto_cruzado(
@@ -455,7 +466,7 @@ def recuperar_contexto_cruzado(
                 # Excluir la sección principal y sus subsecciones
                 if prefijo_principal and prefijo_doc and _es_subseccion(seccion_doc, prefijo_principal):
                     continue
-                # Deduplicar: solo un fragmento por prefijo de sección
+                # Deduplicar: solo un prefijo de sección por consulta cruzada
                 if prefijo_doc in prefijos_visitados:
                     continue
                 # Descartar chunks que son solo encabezados sin contenido sustantivo
@@ -466,11 +477,24 @@ def recuperar_contexto_cruzado(
                     )
                     continue
 
-                fragmento = doc.page_content[:_MAX_CHARS_POR_FRAGMENTO]
+                # Buscar todos los fragmentos que pertenezcan a esta misma sección
+                # para devolver la sección completa en su orden cronológico original.
+                try:
+                    n_total = vector_store._collection.count()
+                    todos_sec_docs = vector_store.similarity_search(seccion_doc, k=n_total)
+                    sec_chunks = [d for d in todos_sec_docs if d.metadata.get("seccion") == seccion_doc]
+                    sec_chunks.sort(key=lambda d: d.metadata.get("chunk_index", 0))
+                    # Limitar a 6 fragmentos por sección cruzada para no saturar
+                    sec_chunks = sec_chunks[:6]
+                except Exception:
+                    sec_chunks = [doc]
+
+                texto_seccion = "\n".join(c.page_content for c in sec_chunks)
+                fragmento = texto_seccion[:_MAX_CHARS_POR_FRAGMENTO]
                 partes.append(f"**{seccion_doc}**\n{fragmento}")
                 prefijos_visitados.add(prefijo_doc)
                 chars_acumulados += len(fragmento)
-                break  # un fragmento representativo por consulta
+                break  # una sección de tesis representativa por consulta
         except Exception as exc:
             logger.warning(f"[Cross-context] Error en query '{nombre_consulta}': {exc}")
 

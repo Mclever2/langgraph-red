@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 _COLLECTION_NAME = "biblioteca_metodologia_e5"   # colección nueva para multilingual-e5-small
 _CHUNK_LIBRO     = 800
 _OVERLAP_LIBRO   = 100
-_K_LIBROS        = 3
+_K_LIBROS        = 10
 
 
 # ── Carga / creación ──────────────────────────────────────────────────────────

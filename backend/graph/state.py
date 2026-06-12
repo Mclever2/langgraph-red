@@ -91,3 +91,12 @@ class MentoriaState(TypedDict):
     auditor_ejecutado:        Optional[bool]
     metodologo_ejecutado:     Optional[bool]
     debate_ejecutado:         Optional[bool]
+
+    # ── Nuevos campos para métricas y subagentes de redactor ─────────────────
+    redactor_evaluacion_rubrica: Optional[Dict]
+    redactor_sugerencias_mejoras: Optional[str]
+    historial_textos:            Optional[List[str]]
+    evaluacion_upao_inicial:     Optional[List[Dict]]
+    evaluacion_upao_final:       Optional[List[Dict]]
+
+

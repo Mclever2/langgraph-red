@@ -38,16 +38,54 @@ def buscar_fragmentos(query: str, k: int = 4) -> str:
     """
     Búsqueda semántica libre en el vector store activo.
 
-    No está limitada a SECCIONES_TESIS — acepta cualquier query que
-    el agente decida plantear. Retorna "" si no hay vector store disponible.
+    Si la query coincide con una sección o sus proximidades,
+    recupera TODOS los fragmentos pertenecientes a esa sección
+    en su orden de lectura original (orden cronológico por chunk_index).
+    Retorna "" si no hay vector store disponible o no hay resultados.
     """
     if _vector_store is None:
         logger.debug("[rag_context] Sin vector store activo — búsqueda omitida")
         return ""
     try:
-        docs = _vector_store.similarity_search(query, k=k)
-        if not docs:
+        n_total = _vector_store._collection.count()
+        if n_total == 0:
             return ""
+
+        # 1. Obtener todos los documentos ordenados por relevancia para identificar la sección
+        todos_docs = _vector_store.similarity_search(query, k=n_total)
+        if not todos_docs:
+            return ""
+
+        # 2. Obtener las secciones de los top-6 resultados más relevantes
+        top_meta = [d.metadata.get("seccion") for d in todos_docs[:6]
+                    if d.metadata.get("seccion")]
+
+        if not top_meta:
+            # Fallback: usar los top k por similitud
+            docs = todos_docs[:k]
+            # Ordenar por el orden de lectura original si existe chunk_index
+            docs.sort(key=lambda d: d.metadata.get("chunk_index", 0))
+        else:
+            from collections import Counter
+            from backend.rag.tesis_store import _extraer_prefijo, _es_subseccion
+
+            # Identificar la sección dominante de los resultados de búsqueda
+            seccion_dominante = Counter(top_meta).most_common(1)[0][0]
+            prefijo_dom = _extraer_prefijo(seccion_dominante)
+
+            if prefijo_dom:
+                # Filtrar todos los que pertenezcan a la sección dominante o sus subsecciones
+                docs = [d for d in todos_docs
+                        if _es_subseccion(d.metadata.get("seccion", ""), prefijo_dom)]
+            else:
+                docs = [d for d in todos_docs
+                        if d.metadata.get("seccion") == seccion_dominante]
+
+            # Ordenar por el orden de lectura original
+            docs.sort(key=lambda d: d.metadata.get("chunk_index", 0))
+            # Limitar a 50 fragmentos para no desbordar el contexto
+            docs = docs[:50]
+
         partes = []
         for i, doc in enumerate(docs, 1):
             seccion = doc.metadata.get("seccion", "")
