@@ -1,0 +1,130 @@
+{
+  "run_id": "4cacfb8a-b523-4463-b91e-4e511c8c8e01",
+  "arquitectura": "langgraph-hub-spoke",
+  "universidad": "upao",
+  "metricas": {
+    "llm_judge_score": 14.5,
+    "llm_judge_max": 15.0,
+    "llm_judge_pct": 0.9667,
+    "llm_judge_secciones": [
+      "2. Descripción y delimitación del problema",
+      "3. Formulación del problema (pregunta central)"
+    ],
+    "llm_judge_items": [
+      {
+        "item_id": "2.1",
+        "descripcion": "Se presenta evidencia empírica (datos estadísticos, estudios previos o reportes oficiales) que demuestra la existencia del problema.",
+        "pts_max": 1.5,
+        "pts_obtenido": 1.5,
+        "razon": "El texto menciona estudios previos que indican que la calidad metodológica en los proyectos de tesis es un aspecto crítico, lo que proporciona evidencia empírica sobre la existencia del problema."
+      },
+      {
+        "item_id": "2.2",
+        "descripcion": "El problema está enmarcado desde lo global hacia lo local (contextualización multinivel: mundial → regional → local).",
+        "pts_max": 1.0,
+        "pts_obtenido": 0.5,
+        "razon": "El texto menciona la situación en la UPAO, pero no proporciona un contexto más amplio que abarque aspectos globales o regionales que justifiquen la relevancia del problema."
+      },
+      {
+        "item_id": "2.3",
+        "descripcion": "Se identifica con claridad la brecha de conocimiento o la deficiencia tecnológica/metodológica que motiva el estudio.",
+        "pts_max": 1.5,
+        "pts_obtenido": 1.5,
+        "razon": "Se identifica claramente la deficiencia en la supervisión y las competencias de los alumnos como la brecha que motiva el estudio."
+      },
+      {
+        "item_id": "2.4",
+        "descripcion": "Se delimitan las variables principales del problema (qué se va a medir o comparar) de manera explícita.",
+        "pts_max": 1.0,
+        "pts_obtenido": 1.0,
+        "razon": "Se mencionan variables como la calidad metodológica y la supervisión, lo que permite entender qué se va a medir en el estudio."
+      },
+      {
+        "item_id": "2.5",
+        "descripcion": "Se delimita el alcance temporal y espacial del estudio (periodo y lugar de ejecución).",
+        "pts_max": 1.0,
+        "pts_obtenido": 1.0,
+        "razon": "El texto especifica que el estudio se realizará en el año 2026 en la UPAO, delimitando claramente el alcance temporal y espacial."
+      },
+      {
+        "item_id": "2.6",
+        "descripcion": "La descripción del problema es coherente con el tipo y diseño de investigación declarado más adelante.",
+        "pts_max": 1.0,
+        "pts_obtenido": 1.0,
+        "razon": "La descripción del problema se alinea con el enfoque de investigación que se espera utilizar, lo que sugiere coherencia en el diseño."
+      },
+      {
+        "item_id": "2.7",
+        "descripcion": "Se mencionan las consecuencias o impacto negativo de no resolver el problema (argumento de urgencia o relevancia).",
+        "pts_max": 1.0,
+        "pts_obtenido": 1.0,
+        "razon": "Se argumenta que la falta de atención a este problema puede llevar a investigaciones con escaso rigor y al abandono de proyectos, lo que resalta la urgencia de abordarlo."
+      },
+      {
+        "item_id": "2.8",
+        "descripcion": "La redacción es clara, libre de ambigüedad y no mezcla el problema con la solución propuesta.",
+        "pts_max": 1.0,
+        "pts_obtenido": 1.0,
+        "razon": "El texto está bien redactado, presentando el problema de manera clara y sin confundirlo con posibles soluciones."
+      },
+      {
+        "item_id": "2.9",
+        "descripcion": "El problema puede ser investigado empíricamente, es decir, sus variables son observables o medibles.",
+        "pts_max": 1.0,
+        "pts_obtenido": 1.0,
+        "razon": "Las variables mencionadas, como la calidad metodológica, son observables y medibles, lo que permite la investigación empírica."
+      },
+      {
+        "item_id": "3.1",
+        "descripcion": "El problema está formulado como una pregunta clara, directa y sin ambigüedad (¿en qué medida?, ¿qué efecto?, ¿cómo se relaciona?).",
+        "pts_max": 1.5,
+        "pts_obtenido": 1.5,
+        "razon": "La pregunta formulada es clara y directa, abordando el efecto del uso de sistemas multi-agente en la calidad metodológica."
+      },
+      {
+        "item_id": "3.2",
+        "descripcion": "La pregunta involucra al menos dos variables o conceptos y su posible relación, diferencia o efecto.",
+        "pts_max": 1.0,
+        "pts_obtenido": 1.0,
+        "razon": "La pregunta incluye las variables 'sistemas multi-agente' y 'calidad metodológica', cumpliendo con este criterio."
+      },
+      {
+        "item_id": "3.3",
+        "descripcion": "La pregunta es respondible mediante el diseño de investigación propuesto (no requiere datos imposibles de obtener).",
+        "pts_max": 1.0,
+        "pts_obtenido": 1.0,
+        "razon": "La pregunta es factible de responder con el diseño de investigación propuesto, ya que se pueden obtener los datos necesarios."
+      },
+      {
+        "item_id": "3.4",
+        "descripcion": "La pregunta no es demasiado amplia ni demasiado estrecha; delimita un problema tratable en el tiempo del estudio.",
+        "pts_max": 0.75,
+        "pts_obtenido": 0.75,
+        "razon": "La pregunta está bien delimitada, enfocándose en un aspecto específico de la calidad metodológica en un tiempo determinado."
+      },
+      {
+        "item_id": "3.5",
+        "descripcion": "La pregunta es coherente con los objetivos (la respuesta a la pregunta equivale a lograr el objetivo general).",
+        "pts_max": 0.75,
+        "pts_obtenido": 0.75,
+        "razon": "La pregunta formulada es coherente con los objetivos del estudio, ya que busca evaluar el impacto de un sistema en la calidad metodológica."
+      }
+    ],
+    "gain_score": 0.8571,
+    "gain_score_interpretacion": "mejora alta",
+    "gain_score_pre": 11.5,
+    "gain_score_post": 14.5,
+    "similitud_coseno": 0.9829,
+    "similitud_coseno_interpretacion": "alta similitud semántica (sin desviaciones)",
+    "context_precision": 0.906,
+    "context_precision_chunks_totales": 10,
+    "context_precision_chunks_relevantes": 9,
+    "context_precision_interpretacion": "alta relevancia RAG",
+    "iterative_consistency": [
+      12.5,
+      14.0,
+      14.0
+    ],
+    "iterative_consistency_has_iter": true
+  }
+}

@@ -24,6 +24,8 @@ Eres un evaluador académico especializado en proyectos de investigación. Tu fu
 
 **{seccion}**
 
+{contexto_iteracion}
+
 ---
 
 ## TEXTO A EVALUAR
