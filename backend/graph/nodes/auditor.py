@@ -191,6 +191,30 @@ def make_nodo_auditor(llm: ChatOpenAI):
             f"Rúbrica: {rubrica_desc} | Universidad: {universidad}"
         )
 
+        # ── Contexto de iteración para que el Auditor reconozca el texto mejorado ──
+        if n_iter > 0:
+            errores_previos = state.get("errores_rubrica", [])
+            texto_errores = ""
+            for e in errores_previos:
+                texto_errores += f"- Ítem {e.get('item_numero', '?')}: {e.get('descripcion', '')}\n"
+                
+            contexto_iteracion = f"""
+---
+## CONTEXTO DE ITERACIÓN (¡IMPORTANTE!)
+
+Estás evaluando una VERSIÓN MEJORADA del texto (Iteración {n_iter}).
+En la iteración anterior, se encontraron los siguientes errores:
+{texto_errores}
+
+Tu tarea principal ahora es VERIFICAR SI ESTOS ERRORES FUERON CORREGIDOS en el nuevo texto.
+- Si el texto nuevo incorpora los elementos solicitados (ej. citas, aclaraciones, referencias, formato), ELEVA EL PUNTAJE de esos ítems a 2 o 3.
+- Reconoce el esfuerzo de mejora. No busques excusas para mantener el puntaje en 1 si el estudiante corrigió lo indicado.
+- NO crees nuevos errores para ítems que ya habían sido aprobados.
+---
+"""
+        else:
+            contexto_iteracion = ""
+
         # ── Inputs base comunes a todos los subagentes ────────────────────────
         inputs_base = {
             "seccion":               seccion,
@@ -202,6 +226,7 @@ def make_nodo_auditor(llm: ChatOpenAI):
             "contexto_teorico":      state.get("contexto_teorico") or "",
             "universidad":           universidad,
             "programa":              programa,
+            "contexto_iteracion":    contexto_iteracion,
             # Drive y biblioteca se añaden dinámicamente via MCP fetch
             "rubrica_institucional_drive": "",
             "contexto_biblioteca_disponible": "",
